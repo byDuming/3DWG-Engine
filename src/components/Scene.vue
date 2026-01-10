@@ -2,22 +2,16 @@
   import { onMounted } from 'vue'
   import { useRenderer } from '@/composables/useRenderer'
   import { useSceneStore } from '@/stores/modules/useScene.store'
-  import { useNotification } from 'naive-ui'
+  import { useDialog, useNotification } from 'naive-ui'
 
   const renderer = useRenderer()
   const sceneStore = useSceneStore()
 
   onMounted(async () => {
-    renderer.initSceneBackground()
     sceneStore.notification = useNotification();
+    sceneStore.dialogProvider = useDialog();
+    renderer.initSceneBackground()
     await sceneStore.initScene().catch((e: any) => console.error('Scene init failed', e))
-    sceneStore.addSceneObjectData({
-      type: 'mesh',
-      name: 'demo-box',
-      mesh: { geometry: { type: 'box', width: 1, height: 1, depth: 1 }, material: { type: 'standard', color: '#00ff00' } },
-      transform: { position: [0, 0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
-      parentId: 'Scene'
-    })
   })
 </script>
 

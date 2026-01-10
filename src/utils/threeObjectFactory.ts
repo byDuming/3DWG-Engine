@@ -35,6 +35,9 @@ import {
   TorusKnotGeometry,
   Color,
   TextureLoader,
+  Scene,
+  Fog,
+  FogExp2,
   FrontSide,
   BackSide,
   DoubleSide,
@@ -138,6 +141,17 @@ function getEnvMapTexture(source?: string | string[], envMapType?: string) {
     return texture
   }
 
+  return null
+}
+
+function getBackgroundTexture(settings?: SceneObjectData['scene']) {
+  if (!settings) return null
+  if (settings.backgroundType === 'texture') {
+    return getTexture(settings.backgroundTexture)
+  }
+  if (settings.backgroundType === 'cube') {
+    return getEnvMapTexture(settings.backgroundCube, 'cube')
+  }
   return null
 }
 
@@ -256,6 +270,51 @@ export function syncThreeObjectState(obj: Object3D, data: SceneObjectData) {
   obj.renderOrder = data.renderOrder ?? obj.renderOrder
   obj.name = data.name ?? obj.name
   obj.userData = { ...obj.userData, ...data.userData, sceneObjectId: data.id, sceneObjectType: data.type }
+}
+
+/** Sync camera settings for PerspectiveCamera. */
+export function applyCameraSettings(camera: PerspectiveCamera, data?: SceneObjectData) {
+  if (!data?.camera) return
+  const { fov, near, far } = data.camera
+  if (fov !== undefined) camera.fov = fov
+  if (near !== undefined) camera.near = near
+  if (far !== undefined) camera.far = far
+  camera.updateProjectionMatrix()
+}
+
+/** Sync Scene-level settings (background/environment/fog) from SceneObjectData. */
+export function applySceneSettings(scene: Scene, data?: SceneObjectData) {
+  if (!data?.scene) return
+  const settings = data.scene
+
+  switch (settings.backgroundType) {
+    case 'none':
+      scene.background = null
+      break
+    case 'texture':
+    case 'cube':
+      scene.background = getBackgroundTexture(settings)
+      break
+    case 'color':
+    default:
+      scene.background = new Color(settings.backgroundColor ?? '#CFD8DC')
+      break
+  }
+
+  if (!settings.environmentType || settings.environmentType === 'none') {
+    scene.environment = null
+  } else {
+    scene.environment = getEnvMapTexture(settings.environmentMap, settings.environmentType)
+  }
+
+  const fog = settings.fog
+  if (!fog || fog.type === 'none') {
+    scene.fog = null
+  } else if (fog.type === 'linear') {
+    scene.fog = new Fog(fog.color ?? '#ffffff', fog.near ?? 1, fog.far ?? 1000)
+  } else if (fog.type === 'exp2') {
+    scene.fog = new FogExp2(fog.color ?? '#ffffff', fog.density ?? 0.00025)
+  }
 }
 
 /** Create geometry from GeometryData (fallback: BoxGeometry) */
@@ -626,7 +685,7 @@ export function createThreeObject(data: SceneObjectData, opts?: { objectsMap?: M
       )
       break
     case 'camera': {
-      const cameraOpts = (data as any).cameraOptions as {
+      const cameraOpts = data.camera as {
         fov?: number
         near?: number
         far?: number

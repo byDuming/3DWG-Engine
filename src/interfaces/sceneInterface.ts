@@ -5,6 +5,34 @@ import type { MaterialData } from "../types/material";
 /**
  * Scene object definition kept in the store and synchronized to Three.js.
  */
+export type SceneBackgroundType = 'none' | 'color' | 'texture' | 'cube';
+export type SceneEnvironmentType = 'none' | 'equirect' | 'hdr' | 'cube';
+export type SceneFogType = 'none' | 'linear' | 'exp2';
+export type CameraType = 'perspective';
+
+export interface SceneSettings {
+  backgroundType?: SceneBackgroundType;
+  backgroundColor?: string;
+  backgroundTexture?: string;
+  backgroundCube?: string[];
+  environmentType?: SceneEnvironmentType;
+  environmentMap?: string | string[];
+  fog?: {
+    type?: SceneFogType;
+    color?: string;
+    near?: number;
+    far?: number;
+    density?: number;
+  };
+}
+
+export interface CameraSettings {
+  type?: CameraType;
+  fov?: number;
+  near?: number;
+  far?: number;
+}
+
 export interface SceneObjectData {
   id: string;
   name?: string;
@@ -27,6 +55,16 @@ export interface SceneObjectData {
    * Helper configuration when the type is `helper`.
    */
   helper?: HelperData;
+
+  /**
+   * Scene configuration when the type is `scene`.
+   */
+  scene?: SceneSettings;
+
+  /**
+   * Camera configuration when the type is `camera`.
+   */
+  camera?: CameraSettings;
 
   /**
    * Core transform (always stored).

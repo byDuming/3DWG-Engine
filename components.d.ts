@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     Attr: typeof import('./src/components/panles/Attr.vue')['default']
     Attributes: typeof import('./src/components/panles/Attributes.vue')['default']
+    CameraAttr: typeof import('./src/components/panles/CameraAttr.vue')['default']
     copy: typeof import('./src/components/panles/Attributes copy.vue')['default']
     Geom: typeof import('./src/components/panles/Geom.vue')['default']
     GeometryAttr: typeof import('./src/components/panles/GeometryAttr.vue')['default']
@@ -21,8 +22,11 @@ declare module 'vue' {
     LeftEditPanle: typeof import('./src/components/LeftEditPanle.vue')['default']
     MaterialAttr: typeof import('./src/components/panles/MaterialAttr.vue')['default']
     NButton: typeof import('naive-ui')['NButton']
+    NButtonGroup: typeof import('naive-ui')['NButtonGroup']
     NColorPicker: typeof import('naive-ui')['NColorPicker']
+    NDialogProvider: typeof import('naive-ui')['NDialogProvider']
     NDivider: typeof import('naive-ui')['NDivider']
+    NDropdown: typeof import('naive-ui')['NDropdown']
     NEmpty: typeof import('naive-ui')['NEmpty']
     NFlex: typeof import('naive-ui')['NFlex']
     NFloatButton: typeof import('naive-ui')['NFloatButton']
@@ -38,6 +42,7 @@ declare module 'vue' {
     NPopover: typeof import('naive-ui')['NPopover']
     NScrollbar: typeof import('naive-ui')['NScrollbar']
     NSelect: typeof import('naive-ui')['NSelect']
+    NSpace: typeof import('naive-ui')['NSpace']
     NSplit: typeof import('naive-ui')['NSplit']
     NSwitch: typeof import('naive-ui')['NSwitch']
     NTabPane: typeof import('naive-ui')['NTabPane']
@@ -48,5 +53,6 @@ declare module 'vue' {
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     Scene: typeof import('./src/components/Scene.vue')['default']
+    SceneAttr: typeof import('./src/components/panles/SceneAttr.vue')['default']
   }
 }

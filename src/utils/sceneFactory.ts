@@ -37,6 +37,8 @@ export interface SceneObjectInput {
   parentId?: string
   mesh?: SceneObjectData['mesh']
   helper?: SceneObjectData['helper']
+  scene?: SceneObjectData['scene']
+  camera?: SceneObjectData['camera']
   transform?: Partial<SceneObjectData['transform']>
   visible?: SceneObjectData['visible']
   castShadow?: SceneObjectData['castShadow']
@@ -462,6 +464,29 @@ export function createSceneObjectData(input: SceneObjectInput): SceneObjectData 
       material: normalizeMaterial(input.mesh?.material)
     }
     : input.mesh
+  const sceneDefaults = input.type === 'scene'
+    ? {
+      backgroundType: 'color' as const,
+      backgroundColor: '#CFD8DC',
+      environmentType: 'none' as const,
+      environmentMap: undefined,
+      fog: {
+        type: 'none' as const,
+        color: '#ffffff',
+        near: 1,
+        far: 1000,
+        density: 0.00025
+      }
+    }
+    : undefined
+  const cameraDefaults = input.type === 'camera'
+    ? {
+      type: 'perspective' as const,
+      fov: 50,
+      near: 0.01,
+      far: 2000
+    }
+    : undefined
 
   return {
     id: input.id ?? '',
@@ -470,6 +495,8 @@ export function createSceneObjectData(input: SceneObjectInput): SceneObjectData 
     parentId: input.parentId,
     mesh,
     helper: input.helper,
+    scene: sceneDefaults ? { ...sceneDefaults, ...(input.scene ?? {}) } : input.scene,
+    camera: cameraDefaults ? { ...cameraDefaults, ...(input.camera ?? {}) } : input.camera,
     transform: {
       position: input.transform?.position ?? [0, 0, 0],
       rotation: input.transform?.rotation ?? [0, 0, 0],

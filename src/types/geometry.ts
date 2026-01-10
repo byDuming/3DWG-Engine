@@ -14,6 +14,23 @@ export type GeometryData =
   | RingGeometryData
   | CapsuleGeometryData
 
+export const geometryTypeOptions = [
+  { label: '正方体', value: 'box' },
+  { label: '胶囊', value: 'capsule' },
+  { label: '球体', value: 'sphere' },
+  { label: '圆柱体', value: 'cylinder' },
+  { label: '圆锥体', value: 'cone' },
+  { label: '平面', value: 'plane' },
+  { label: '圆环', value: 'torus' },
+  { label: '环面扭结', value: 'torusKnot' },
+  { label: '四面体', value: 'tetrahedron' },
+  { label: '八面体', value: 'octahedron' },
+  { label: '十二面体', value: 'dodecahedron' },
+  { label: '二十面体', value: 'icosahedron' },
+  { label: '圆', value: 'circle' },
+  { label: '环形', value: 'ring' }
+]
+
 interface BaseGeometryData {
   /**
    * 几何体类型标识

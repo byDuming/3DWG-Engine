@@ -186,6 +186,16 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
   function handleKeyDown(event: KeyboardEvent) {
     const tag = (event.target as HTMLElement | null)?.tagName
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (event.target as HTMLElement | null)?.isContentEditable) return
+    if (event.key.toLowerCase() === 'z' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault()
+      // Ctrl/Cmd + Z 撤回，Shift + Z 回退
+      if (event.shiftKey) {
+        sceneStore.redo?.()
+      } else {
+        sceneStore.undo?.()
+      }
+      return
+    }
     if (event.key.toLowerCase() === 's' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault()
       sceneStore.saveScene?.()
@@ -269,8 +279,6 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
   }
 
   watch(() => sceneStore.selectedObjectId, (id) => {
-    console.log('执行我了？？', id);
-    
     attachTransformControl(id)
   }, { immediate: true })
 
@@ -279,7 +287,6 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
   })
 
   watch(() => sceneStore.transformMode, (mode) => {
-    console.log('执行我了？？2', mode);
     transformControls.value?.setMode(mode)
   })
 

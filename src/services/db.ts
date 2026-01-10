@@ -52,6 +52,18 @@ export async function initDB(): Promise<{ inst: ReturnType<typeof getInstance>; 
           id: 'Scene',
           name: '场景',
           type: 'scene',
+          scene: {
+            backgroundType: 'color',
+            backgroundColor: '#CFD8DC',
+            environmentType: 'none',
+            fog: {
+              type: 'none',
+              color: '#ffffff',
+              near: 1,
+              far: 1000,
+              density: 0.00025
+            }
+          },
           transform: {
             position: [0, 0, 0],
             rotation: [0, 0, 0],
@@ -67,6 +79,12 @@ export async function initDB(): Promise<{ inst: ReturnType<typeof getInstance>; 
           id: 'camera-1',
           name: 'Main Camera',
           type: 'camera',
+          camera: {
+            type: 'perspective',
+            fov: 50,
+            near: 0.01,
+            far: 2000
+          },
           parentId: undefined,
           transform: {
             position: [25, 30, 20],

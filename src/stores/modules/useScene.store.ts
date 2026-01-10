@@ -4,15 +4,16 @@
   import { defineStore } from 'pinia'
   import { Object3D, Scene } from 'three/webgpu'
   import type { WebGPURenderer } from 'three/webgpu'
-  import { computed, ref, shallowRef,h, type VNodeChild } from 'vue'
+import { computed, ref, shallowRef, h, type VNodeChild, toRaw, watch } from 'vue'
   import { createSceneObjectData, type SceneObjectInput } from '@/utils/sceneFactory.ts'
-  import { applyTransform, createThreeObject, syncThreeObjectState, updateMeshGeometry, updateMeshMaterial } from '@/utils/threeObjectFactory.ts'
+import { applyCameraSettings, applySceneSettings, applyTransform, createThreeObject, syncThreeObjectState, updateMeshGeometry, updateMeshMaterial } from '@/utils/threeObjectFactory.ts'
   import { NIcon, useNotification, type TreeOption } from 'naive-ui'
   import {Cube,LogoDropbox,CubeOutline,Camera} from '@vicons/ionicons5'
   import { LightbulbFilled,MovieCreationFilled } from '@vicons/material'
   import { Cubes } from '@vicons/fa'
   import { useRenderer } from '@/composables/useRenderer'
-import type { NotificationApiInjection } from 'naive-ui/es/notification/src/NotificationProvider'
+  import type { NotificationApiInjection } from 'naive-ui/es/notification/src/NotificationProvider'
+  import type { DialogApiInjection } from 'naive-ui/es/dialog/src/DialogProvider'
 
 //  `defineStore()` 的返回值的命名是自由的
 // 但最好能显得store 的名字，且以 `use` 开头，尾`Store` 结尾。
@@ -24,7 +25,8 @@ export const useSceneStore = defineStore('scene', () => {
   const aIds = ref(1) // 场景内对象自增ID
 
   
-  const notification = shallowRef<NotificationApiInjection>();
+  const notification = ref<NotificationApiInjection>();
+  const dialogProvider = ref<DialogApiInjection>();
 
 
   // Threejs 对象映射（扁平化，快速查找）
@@ -66,16 +68,168 @@ export const useSceneStore = defineStore('scene', () => {
   const transformMode = ref<'translate' | 'rotate' | 'scale'>('translate');
   const transformSpace = ref<'world' | 'local'>('world');
 
+  type SceneSnapshot = {
+    objectDataList: SceneObjectData[]
+    selectedObjectId: string | null
+    aIds: number
+  }
+
+  const undoStack = ref<SceneSnapshot[]>([]) // 撤回栈：保存历史快照
+  const redoStack = ref<SceneSnapshot[]>([]) // 回退栈：保存已撤回的快照
+  const isRestoring = ref(false) // 快照恢复中，防止递归记录
+  const maxHistory = 50 // 最多保留的快照数量
+  const historyDebounceMs = ref(300) // 高频更新的去抖间隔
+  const historyDebounceTimer = ref<ReturnType<typeof setTimeout> | null>(null) // 去抖计时器
+  const lastSnapshot = shallowRef<SceneSnapshot | null>(null) // 上一次用于入栈的快照
+  const snapshotKeyMode = ref<'blacklist' | 'whitelist'>('blacklist')
+  const snapshotKeyList = ref<string[]>([
+    'file',
+    'files',
+    'image',
+    'images',
+    'texture',
+    'textures',
+    '__threeObject'
+  ])
+
+  function setSnapshotKeyMode(mode: 'blacklist' | 'whitelist') {
+    snapshotKeyMode.value = mode
+  }
+
+  function setSnapshotKeyList(keys: string[]) {
+    snapshotKeyList.value = Array.from(new Set(keys))
+  }
+
+  /** 深拷贝并过滤不可序列化对象，保证快照稳定可用。 */
+  function cloneSnapshot(value: SceneSnapshot): SceneSnapshot {
+    const raw = toRaw(value)
+    const seen = new WeakSet<object>()
+    const json = JSON.stringify(raw, (key, val) => {
+      if (key) {
+        const keyList = snapshotKeyList.value
+        // 白名单/黑名单：过滤掉不希望进入快照的字段
+        if (snapshotKeyMode.value === 'blacklist' && keyList.includes(key)) return undefined
+        if (snapshotKeyMode.value === 'whitelist' && !keyList.includes(key)) return undefined
+      }
+      // 过滤不可序列化对象，避免快照崩溃
+      if (typeof val === 'function' || typeof val === 'symbol') return undefined
+      if (typeof File !== 'undefined' && val instanceof File) return undefined
+      if (typeof Blob !== 'undefined' && val instanceof Blob) return undefined
+      if (typeof ImageBitmap !== 'undefined' && val instanceof ImageBitmap) return undefined
+      if (typeof window !== 'undefined') {
+        if (val === window) return undefined
+        if (typeof Window !== 'undefined' && val instanceof Window) return undefined
+      }
+      if (val && typeof val === 'object') {
+        // 跳过循环引用，保证 JSON 序列化稳定
+        if (seen.has(val)) return undefined
+        seen.add(val)
+      }
+      return val
+    })
+    return JSON.parse(json) as SceneSnapshot
+  }
+
+  /** 生成撤回/回退所需的最小快照。 */
+  function createSnapshot(): SceneSnapshot {
+    return cloneSnapshot({
+      objectDataList: toRaw(objectDataList.value),
+      selectedObjectId: selectedObjectId.value,
+      aIds: aIds.value
+    })
+  }
+
+  /** 推入历史栈，并清空回退栈，保持线性时间线。 */
+  function pushHistorySnapshot(snapshot?: SceneSnapshot) {
+    if (isRestoring.value) return
+    undoStack.value.push(snapshot ? cloneSnapshot(snapshot) : createSnapshot())
+    if (undoStack.value.length > maxHistory) {
+      undoStack.value.shift()
+    }
+    redoStack.value = []
+  }
+
+  /** 用去抖限制高频变更的快照记录频率。 */
+  function scheduleHistorySnapshot() {
+    if (isRestoring.value) return
+    if (!lastSnapshot.value) lastSnapshot.value = createSnapshot()
+    if (!historyDebounceTimer.value) {
+      // 去抖的第一次进入立刻记录，避免丢掉“起点”
+      pushHistorySnapshot(lastSnapshot.value)
+    }
+    if (historyDebounceTimer.value) {
+      clearTimeout(historyDebounceTimer.value)
+    }
+    historyDebounceTimer.value = setTimeout(() => {
+      historyDebounceTimer.value = null
+      // 去抖结束后刷新最新快照作为下一次起点
+      lastSnapshot.value = createSnapshot()
+    }, historyDebounceMs.value)
+  }
+
+  /** 恢复快照并基于数据重建 three 对象映射。 */
+  function applySnapshot(snapshot: SceneSnapshot) {
+    isRestoring.value = true
+    objectDataList.value = cloneSnapshot(snapshot).objectDataList
+    selectedObjectId.value = snapshot.selectedObjectId
+    aIds.value = snapshot.aIds
+
+    objectsMap.value.forEach(obj => {
+      if (obj.parent) obj.parent.remove(obj)
+    })
+    objectsMap.value.clear()
+    if (threeScene.value) {
+      // 按数据重新构建 three 对象
+      setThreeScene(threeScene.value)
+    }
+    selectionVersion.value += 1
+    isRestoring.value = false
+    if (historyDebounceTimer.value) {
+      clearTimeout(historyDebounceTimer.value)
+      historyDebounceTimer.value = null
+    }
+    // 让快照起点与当前状态对齐，避免连续撤回不一致
+    lastSnapshot.value = createSnapshot()
+  }
+
+  /** 撤回到上一条快照。 */
+  function undo() {
+    const snapshot = undoStack.value.pop()
+    if (!snapshot) return
+    // 撤回前先把当前状态塞到回退栈
+    redoStack.value.push(createSnapshot())
+    applySnapshot(snapshot)
+  }
+
+  /** 回退到下一条快照。 */
+  function redo() {
+    const snapshot = redoStack.value.pop()
+    if (!snapshot) return
+    // 回退前先把当前状态塞到撤回栈
+    undoStack.value.push(createSnapshot())
+    applySnapshot(snapshot)
+  }
+
   async function initScene() {
     const { sceneData } = await initDB() // 初始化数据库并获取场景数据
     name.value = sceneData.name // store 名称
     version.value = sceneData.version // store 版本
     aIds.value = sceneData.aIds // 场景内对象自增ID
+    isRestoring.value = true
     objectDataList.value = sceneData.objectDataList ?? [] // 引擎逻辑层级
 
     // 数据准备好后，确保 three 场景和对象同步
     const scene = threeScene.value ?? new Scene()
     setThreeScene(scene)
+    isRestoring.value = false
+
+    undoStack.value = []
+    redoStack.value = []
+    lastSnapshot.value = createSnapshot()
+    if (historyDebounceTimer.value) {
+      clearTimeout(historyDebounceTimer.value)
+      historyDebounceTimer.value = null
+    }
   }
 
   // 获取树形结构（用于层级面板），返回 TreeOption[]
@@ -179,6 +333,11 @@ export const useSceneStore = defineStore('scene', () => {
       } else {
         applyTransform(obj, data)
       }
+      if (data.type === 'camera' && obj instanceof Object3D) {
+        if ((obj as any).isPerspectiveCamera) {
+          applyCameraSettings(obj as any, data)
+        }
+      }
     })
 
     objectsMap.value.forEach((obj, id) => {
@@ -188,6 +347,11 @@ export const useSceneStore = defineStore('scene', () => {
       const parent = data.parentId ? objectsMap.value.get(data.parentId) : threeScene.value
       parent?.add(obj)
     })
+
+    const sceneData = objectDataList.value.find(item => item.type === 'scene')
+    if (sceneData && threeScene.value) {
+      applySceneSettings(threeScene.value, sceneData)
+    }
   }
 
   function setSelectedObject(id: string | null) {
@@ -286,6 +450,16 @@ export const useSceneStore = defineStore('scene', () => {
 
     if ((typeChanged || helperChanged || meshChanged || parentChanged) && selectedObjectId.value === id) {
       selectionVersion.value += 1
+    }
+
+    if (nextData.type === 'scene' && threeScene.value) {
+      applySceneSettings(threeScene.value, nextData)
+    }
+    if (nextData.type === 'camera') {
+      const obj = objectsMap.value.get(id)
+      if (obj && (obj as any).isPerspectiveCamera) {
+        applyCameraSettings(obj as any, nextData)
+      }
     }
 
     return target // 返回更新后的数据
@@ -441,6 +615,12 @@ export const useSceneStore = defineStore('scene', () => {
     })
   }
 
+  /** 统一监听器：所有数据变化都走去抖快照。 */
+  watch(objectDataList, () => {
+    // 所有变更统一进入去抖记录
+    scheduleHistorySnapshot()
+  }, { deep: true, flush: 'sync' })
+
   return {
     initScene,
     name,
@@ -458,6 +638,8 @@ export const useSceneStore = defineStore('scene', () => {
     addSceneObjectData,
     updateSceneObjectData,
     removeSceneObjectData,
+    undo,
+    redo,
     // 获取树形结构
     getObjectTree,
     applyObjectTree,
@@ -471,6 +653,13 @@ export const useSceneStore = defineStore('scene', () => {
     transformMode,
     transformSpace,
 
-    notification
+    notification,
+    dialogProvider,
+    undoStack,
+    redoStack,
+    snapshotKeyMode,
+    snapshotKeyList,
+    setSnapshotKeyMode,
+    setSnapshotKeyList
   }
 })
