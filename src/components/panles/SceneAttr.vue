@@ -58,7 +58,9 @@
 
   function handleBackgroundFiles(fileList: UploadFileInfo[]) {
     uploadFileLists.background = fileList
-    const files = fileList.map(file => file.file).filter(Boolean) as File[]
+    const files = fileList
+      .map(item => item.file)
+      .filter((file): file is File => Boolean(file))
     if (!files.length) return
 
     if (sceneSettings.value?.backgroundType === 'cube' && files.length > 1) {
@@ -69,7 +71,7 @@
       return
     }
 
-    const file = files[0]
+    const file = files[0]!
     fileNames.background = file.name
     const reader = new FileReader()
     reader.onload = () => {
@@ -82,7 +84,9 @@
 
   function handleEnvironmentFiles(fileList: UploadFileInfo[]) {
     uploadFileLists.environment = fileList
-    const files = fileList.map(file => file.file).filter(Boolean) as File[]
+    const files = fileList
+      .map(item => item.file)
+      .filter((file): file is File => Boolean(file))
     if (!files.length) return
 
     if (sceneSettings.value?.environmentType === 'cube' && files.length > 1) {
@@ -93,7 +97,7 @@
       return
     }
 
-    const file = files[0]
+    const file = files[0]!
     fileNames.environment = file.name
     if (sceneSettings.value?.environmentType === 'hdr') {
       updateSceneSettings({ environmentMap: URL.createObjectURL(file) })
@@ -113,6 +117,11 @@
   function getLabel(key: string, fallback: string) {
     return fileNames[key] || fallback
   }
+
+  const backgroundCubeArray = computed(() => Array.isArray(sceneSettings.value?.backgroundCube) ? sceneSettings.value?.backgroundCube ?? [] : [])
+  const backgroundCubePreviewList = computed(() => backgroundCubeArray.value.filter(isPreviewableTexture))
+  const environmentMapArray = computed(() => Array.isArray(sceneSettings.value?.environmentMap) ? sceneSettings.value?.environmentMap ?? [] : [])
+  const environmentPreviewList = computed(() => environmentMapArray.value.filter(isPreviewableTexture))
 
   function isPreviewableTexture(value?: string) {
     if (!value) return false
@@ -188,12 +197,11 @@
             >
               <n-button size="small" class="texture-button">{{ getLabel('background', '选择贴图') }}</n-button>
             </n-upload>
-            <n-image-group v-if="Array.isArray(sceneSettings?.backgroundCube)">
+            <n-image-group v-if="backgroundCubePreviewList.length">
               <div class="texture-preview-row">
                 <n-image
-                  v-for="(url, index) in sceneSettings?.backgroundCube"
+                  v-for="(url, index) in backgroundCubePreviewList"
                   :key="index"
-                  v-if="isPreviewableTexture(url)"
                   :src="url"
                   class="texture-preview-container"
                   :img-props="{ class: 'texture-preview-thumb' }"
@@ -231,12 +239,11 @@
             >
               <n-button size="small" class="texture-button">{{ getLabel('environment', '选择贴图') }}</n-button>
             </n-upload>
-            <n-image-group v-if="Array.isArray(sceneSettings?.environmentMap)">
+            <n-image-group v-if="environmentPreviewList.length">
               <div class="texture-preview-row">
                 <n-image
-                  v-for="(url, index) in sceneSettings?.environmentMap"
+                  v-for="(url, index) in environmentPreviewList"
                   :key="index"
-                  v-if="isPreviewableTexture(url)"
                   :src="url"
                   class="texture-preview-container"
                   :img-props="{ class: 'texture-preview-thumb' }"

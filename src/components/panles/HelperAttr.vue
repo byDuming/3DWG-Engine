@@ -27,12 +27,73 @@
   type TargetedHelper = HelperData & { targetId?: string }
   type Vec3Key = 'dir' | 'origin' | 'min' | 'max' | 'normal'
 
-  const helper = computed(() => sceneStore.cureentObjectData?.helper as HelperData | undefined)
+  const linkedHelpers = computed(() =>
+    sceneStore.objectDataList.filter(item =>
+      item.type === 'helper' && (item.helper as TargetedHelper | undefined)?.targetId === sceneStore.selectedObjectId
+    )
+  )
+  const selectedHelper = computed(() => {
+    const selected = sceneStore.objectDataList.find(item => item.id === sceneStore.selectedObjectId)
+    return selected?.type === 'helper' ? selected : null
+  })
+  const activeHelper = computed(() => selectedHelper.value ?? linkedHelpers.value[0] ?? null)
+
+  const helper = computed(() => activeHelper.value?.helper as HelperData | undefined)
   const helperType = computed(() => helper.value?.type)
-  const hasTargetId = computed(() => !!helper.value && 'targetId' in helper.value)
+  // const hasTargetId = computed(() => !!helper.value && 'targetId' in helper.value)
+  const showTargetSelector = computed(() => {
+    const type = helperType.value
+    if (!type) return false
+    return [
+      'camera',
+      'box',
+      'directionalLight',
+      'hemisphereLight',
+      'pointLight',
+      'spotLight',
+      'rectAreaLight',
+      'skeleton',
+      'lightProbe',
+      'vertexNormals'
+    ].includes(type)
+  })
   const targetIdValue = computed(() =>
     helper.value && 'targetId' in helper.value ? (helper.value as TargetedHelper).targetId ?? '' : ''
   )
+  const targetFilter = computed(() => {
+    const type = helperType.value
+    if (!type) return null
+    if (type === 'camera') return { objectType: 'camera' }
+    if (['directionalLight', 'pointLight', 'spotLight', 'hemisphereLight', 'rectAreaLight'].includes(type)) {
+      return { objectType: 'light', lightType: type }
+    }
+    return null
+  })
+  const targetOptions = computed(() => {
+    const baseTargets = sceneStore.objectDataList
+      .filter(item => item.type !== 'helper' && item.type !== 'scene')
+    const filtered = baseTargets.filter(item => {
+      const filter = targetFilter.value
+      if (!filter) return true
+      if (item.type !== filter.objectType) return false
+      if (filter.objectType === 'light') {
+        return (item.userData as any)?.lightType === filter.lightType
+      }
+      return true
+    })
+
+    const ensureCurrent = targetIdValue.value
+      ? baseTargets.find(item => item.id === targetIdValue.value)
+      : undefined
+    const optionsSource = ensureCurrent && !filtered.some(item => item.id === ensureCurrent.id)
+      ? [ensureCurrent, ...filtered]
+      : filtered
+
+    return optionsSource.map(item => ({
+      label: item.name ? `${item.name} (${item.type})` : item.id,
+      value: item.id
+    }))
+  })
 
   // 按类型拆分 helper 数据，避免访问不存在的字段
   const axesHelper = computed(() => helper.value?.type === 'axes' ? (helper.value as AxesHelperData) : null)
@@ -66,9 +127,9 @@
 
   // 合并更新 helper 配置
   function updateHelper(patch: Record<string, unknown>) {
-    const id = sceneStore.selectedObjectId
+    const id = activeHelper.value?.id
     if (!id) return
-    const current = sceneStore.cureentObjectData?.helper
+    const current = activeHelper.value?.helper
     if (!current) return
     const next = { ...current, ...patch }
     sceneStore.updateSceneObjectData(id, { helper: next } as any)
@@ -98,7 +159,7 @@
     <n-grid x-gap="12" :cols="8">
       <n-gi class="gid-item" :span="2">类型</n-gi>
       <n-gi class="gid-item" :span="6">
-        <n-input :value="sceneStore.cureentObjectData?.type" type="text" disabled />
+        <n-input :value="activeHelper?.type" type="text" disabled />
       </n-gi>
     </n-grid>
 
@@ -109,12 +170,15 @@
       </n-gi>
     </n-grid>
 
-    <n-grid v-if="hasTargetId" x-gap="12" :cols="8">
+    <n-grid v-if="showTargetSelector" x-gap="12" :cols="8">
       <n-gi class="gid-item" :span="2">目标ID</n-gi>
       <n-gi class="gid-item" :span="6">
-        <n-input
+        <n-select
+          :options="targetOptions"
           :value="targetIdValue"
-          placeholder="场景对象ID"
+          placeholder="选择目标对象"
+          clearable
+          filterable
           @update:value="(v: string) => updateHelperText('targetId', v)"
         />
       </n-gi>

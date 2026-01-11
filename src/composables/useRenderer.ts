@@ -1,6 +1,6 @@
-import { ref, shallowRef, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, shallowRef, onBeforeUnmount, watch } from 'vue'
 import { Scene, WebGPURenderer, PerspectiveCamera, Color } from 'three/webgpu'
-import { Raycaster, Vector2, Box3, Vector3 } from 'three'
+import { Raycaster, Vector2, Box3, Vector3, Object3D } from 'three'
 import { useSceneStore } from '@/stores/modules/useScene.store.ts'
 import { MapControls } from 'three/addons/controls/MapControls.js'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
@@ -157,14 +157,38 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
     raycaster.setFromCamera(pointer, camera.value)
     const objects = Array.from(sceneStore.objectsMap.values())
     const intersections = raycaster.intersectObjects(objects, true)
+    const getSceneObjectId = (obj: Object3D | null) => {
+      let current: Object3D | null = obj
+      while (current) {
+        const id = (current as any).userData?.sceneObjectId as string | undefined
+        if (id) return id
+        current = current.parent as Object3D | null
+      }
+      return null
+    }
     const hit = intersections.find(item => {
-      const id = item.object?.userData?.sceneObjectId
+      const id = getSceneObjectId(item.object)
       if (!id) return false
-      if (item.object?.userData?.sceneObjectType === 'helper') return false
+      const data = sceneStore.objectDataList.find(entry => entry.id === id)
+      if (data?.selectable === false) return false
+      ;(item as any).__sceneObjectId = id
       return true
     })
 
-    sceneStore.setSelectedObject(hit?.object?.userData?.sceneObjectId ?? null)
+    const hitId = (hit as any)?.__sceneObjectId ?? null
+    if (!hitId) {
+      sceneStore.selectedObjectId = null
+      return
+    }
+    const selected = sceneStore.objectDataList.find(item => item.id === hitId)
+    if (selected?.type === 'helper') {
+      const helperTargetId = (selected.helper as any)?.targetId as string | undefined
+      if (helperTargetId && sceneStore.objectDataList.some(item => item.id === helperTargetId)) {
+        sceneStore.selectedObjectId = helperTargetId
+        return
+      }
+    }
+    sceneStore.selectedObjectId = hitId
   }
 
   function focusSelectedObject() {

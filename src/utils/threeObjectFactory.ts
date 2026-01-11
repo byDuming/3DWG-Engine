@@ -38,6 +38,12 @@ import {
   Scene,
   Fog,
   FogExp2,
+  AmbientLight,
+  DirectionalLight,
+  HemisphereLight,
+  PointLight,
+  SpotLight,
+  RectAreaLight,
   FrontSide,
   BackSide,
   DoubleSide,
@@ -52,6 +58,9 @@ import {
   LinearMipmapLinearFilter,
   EquirectangularReflectionMapping,
   type Texture,
+  type Wrapping,
+  type MagnificationTextureFilter,
+  type MinificationTextureFilter,
 
   ArrowHelper,
   AxesHelper,
@@ -81,12 +90,16 @@ const textureLoader = new TextureLoader()
 const cubeTextureLoader = new CubeTextureLoader()
 const rgbeLoader = new RGBELoader()
 const textureCache = new Map<string, Texture>()
-const wrapMap: Record<string, number> = {
+const wrapMap: Record<string, Wrapping> = {
   repeat: RepeatWrapping,
   clampToEdge: ClampToEdgeWrapping,
   mirroredRepeat: MirroredRepeatWrapping
 }
-const filterMap: Record<string, number> = {
+const magFilterMap: Record<string, MagnificationTextureFilter> = {
+  nearest: NearestFilter,
+  linear: LinearFilter
+}
+const minFilterMap: Record<string, MinificationTextureFilter> = {
   nearest: NearestFilter,
   linear: LinearFilter,
   nearestMipmapNearest: NearestMipmapNearestFilter,
@@ -157,10 +170,22 @@ function getBackgroundTexture(settings?: SceneObjectData['scene']) {
 
 function applyTextureSettings(texture: Texture | null, mat: MaterialData) {
   if (!texture) return
-  if (mat.wrapS && wrapMap[mat.wrapS]) texture.wrapS = wrapMap[mat.wrapS]
-  if (mat.wrapT && wrapMap[mat.wrapT]) texture.wrapT = wrapMap[mat.wrapT]
-  if (mat.magFilter && filterMap[mat.magFilter]) texture.magFilter = filterMap[mat.magFilter]
-  if (mat.minFilter && filterMap[mat.minFilter]) texture.minFilter = filterMap[mat.minFilter]
+  if (mat.wrapS) {
+    const wrap = wrapMap[mat.wrapS]
+    if (wrap !== undefined) texture.wrapS = wrap
+  }
+  if (mat.wrapT) {
+    const wrap = wrapMap[mat.wrapT]
+    if (wrap !== undefined) texture.wrapT = wrap
+  }
+  if (mat.magFilter) {
+    const magFilter = magFilterMap[mat.magFilter]
+    if (magFilter !== undefined) texture.magFilter = magFilter
+  }
+  if (mat.minFilter) {
+    const minFilter = minFilterMap[mat.minFilter]
+    if (minFilter !== undefined) texture.minFilter = minFilter
+  }
   if ((texture as any).image !== null) {
     texture.needsUpdate = true
   }
@@ -270,6 +295,30 @@ export function syncThreeObjectState(obj: Object3D, data: SceneObjectData) {
   obj.renderOrder = data.renderOrder ?? obj.renderOrder
   obj.name = data.name ?? obj.name
   obj.userData = { ...obj.userData, ...data.userData, sceneObjectId: data.id, sceneObjectType: data.type }
+}
+
+export function applyLightSettings(light: any, data: SceneObjectData) {
+  const payload = (data.userData ?? {}) as any
+  if (!light || !payload) return
+  if (payload.color && light.color) light.color.set(payload.color)
+  if (payload.intensity !== undefined && 'intensity' in light) light.intensity = payload.intensity
+
+  if (light.isPointLight || light.isSpotLight) {
+    if (payload.distance !== undefined) light.distance = payload.distance
+    if (payload.decay !== undefined) light.decay = payload.decay
+  }
+  if (light.isSpotLight) {
+    if (payload.angle !== undefined) light.angle = payload.angle
+    if (payload.penumbra !== undefined) light.penumbra = payload.penumbra
+  }
+  if (light.isRectAreaLight) {
+    if (payload.width !== undefined) light.width = payload.width
+    if (payload.height !== undefined) light.height = payload.height
+  }
+  if (light.isHemisphereLight) {
+    if (payload.skyColor && light.color) light.color.set(payload.skyColor)
+    if (payload.groundColor && light.groundColor) light.groundColor.set(payload.groundColor)
+  }
 }
 
 /** Sync camera settings for PerspectiveCamera. */
@@ -670,6 +719,45 @@ function createHelperFromData(helper?: HelperData, objectsMap?: Map<string, Obje
   }
 }
 
+function createLightFromData(data: SceneObjectData) {
+  const lightType = (data.userData as any)?.lightType as string | undefined
+  const color = (data.userData as any)?.color ?? '#ffffff'
+  const intensity = (data.userData as any)?.intensity ?? 1
+
+  switch (lightType) {
+    case 'directionalLight':
+      return new DirectionalLight(color, intensity)
+    case 'pointLight':
+      return new PointLight(color, intensity, (data.userData as any)?.distance ?? 0, (data.userData as any)?.decay ?? 2)
+    case 'spotLight':
+      return new SpotLight(
+        color,
+        intensity,
+        (data.userData as any)?.distance ?? 0,
+        (data.userData as any)?.angle ?? Math.PI / 3,
+        (data.userData as any)?.penumbra ?? 0,
+        (data.userData as any)?.decay ?? 2
+      )
+    case 'hemisphereLight':
+      return new HemisphereLight(
+        (data.userData as any)?.skyColor ?? '#ffffff',
+        (data.userData as any)?.groundColor ?? '#444444',
+        intensity
+      )
+    case 'rectAreaLight':
+      return new RectAreaLight(
+        color,
+        intensity,
+        (data.userData as any)?.width ?? 10,
+        (data.userData as any)?.height ?? 10
+      )
+    case 'ambientLight':
+      return new AmbientLight(color, intensity)
+    default:
+      return new DirectionalLight(color, intensity)
+  }
+}
+
 /** Create Three Object3D from SceneObjectData (geometry, material, helper, name) */
 export function createThreeObject(data: SceneObjectData, opts?: { objectsMap?: Map<string, Object3D> }): Object3D {
   let obj: Object3D
@@ -700,6 +788,9 @@ export function createThreeObject(data: SceneObjectData, opts?: { objectsMap?: M
     }
     case 'helper':
       obj = createHelperFromData(data.helper, opts?.objectsMap)
+      break
+    case 'light':
+      obj = createLightFromData(data)
       break
     default:
       obj = new Object3D()

@@ -108,6 +108,12 @@ export interface SceneObjectData {
   renderOrder?: number;
 
   /**
+   * Whether the object can be selected via raycast.
+   * @default true
+   */
+  selectable?: boolean;
+
+  /**
    * Parent object ID.
    */
   parentId?: string;

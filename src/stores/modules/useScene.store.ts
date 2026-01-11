@@ -6,8 +6,8 @@
   import type { WebGPURenderer } from 'three/webgpu'
 import { computed, ref, shallowRef, h, type VNodeChild, toRaw, watch } from 'vue'
   import { createSceneObjectData, type SceneObjectInput } from '@/utils/sceneFactory.ts'
-import { applyCameraSettings, applySceneSettings, applyTransform, createThreeObject, syncThreeObjectState, updateMeshGeometry, updateMeshMaterial } from '@/utils/threeObjectFactory.ts'
-  import { NIcon, useNotification, type TreeOption } from 'naive-ui'
+import { applyCameraSettings, applyLightSettings, applySceneSettings, applyTransform, createThreeObject, syncThreeObjectState, updateMeshGeometry, updateMeshMaterial } from '@/utils/threeObjectFactory.ts'
+  import { NIcon, type TreeOption } from 'naive-ui'
   import {Cube,LogoDropbox,CubeOutline,Camera} from '@vicons/ionicons5'
   import { LightbulbFilled,MovieCreationFilled } from '@vicons/material'
   import { Cubes } from '@vicons/fa'
@@ -338,6 +338,9 @@ export const useSceneStore = defineStore('scene', () => {
           applyCameraSettings(obj as any, data)
         }
       }
+      if (data.type === 'light') {
+        applyLightSettings(obj as any, data)
+      }
     })
 
     objectsMap.value.forEach((obj, id) => {
@@ -354,9 +357,6 @@ export const useSceneStore = defineStore('scene', () => {
     }
   }
 
-  function setSelectedObject(id: string | null) {
-    selectedObjectId.value = id
-  }
 
   function addChildToParent(parentId: string, childId: string) {
     const parent = objectDataList.value.find(item => item.id === parentId)
@@ -414,8 +414,12 @@ export const useSceneStore = defineStore('scene', () => {
     const typeChanged = patch.type !== undefined && patch.type !== target.type // 判断类型是否变化
     const helperChanged = patch.helper !== undefined && target.type === 'helper'
     const meshChanged = patch.mesh !== undefined && target.type === 'mesh'
+    const lightTypeChanged =
+      target.type === 'light'
+      && patch.userData !== undefined
+      && (patch.userData as any)?.lightType !== (target.userData as any)?.lightType
     let meshRebuilt = false
-    if (typeChanged || helperChanged) { // 类型或helper配置变更需要重建three对象
+    if (typeChanged || helperChanged || lightTypeChanged) { // 类型或helper配置变更需要重建three对象
       const old = objectsMap.value.get(id) // 取出现有three对象
       if (old?.parent) old.parent.remove(old) // 从场景移除旧对象
       const newObj = createThreeObject(nextData, { objectsMap: objectsMap.value }) // 用最新数据创建新对象
@@ -461,6 +465,10 @@ export const useSceneStore = defineStore('scene', () => {
         applyCameraSettings(obj as any, nextData)
       }
     }
+    if (nextData.type === 'light') {
+      const obj = objectsMap.value.get(id)
+      if (obj) applyLightSettings(obj as any, nextData)
+    }
 
     return target // 返回更新后的数据
   }
@@ -504,63 +512,63 @@ export const useSceneStore = defineStore('scene', () => {
     }
   }
 
-  function disposeMaterial(material: any, disposedMaterials: Set<unknown>, disposedTextures: Set<unknown>) {
-    if (!material || disposedMaterials.has(material)) return
-    const textureKeys = [
-      'map',
-      'lightMap',
-      'aoMap',
-      'emissiveMap',
-      'bumpMap',
-      'normalMap',
-      'displacementMap',
-      'roughnessMap',
-      'metalnessMap',
-      'alphaMap',
-      'envMap',
-      'specularMap',
-      'gradientMap',
-      'matcap'
-    ]
-    textureKeys.forEach(key => {
-      const texture = material[key]
-      if (texture && typeof texture.dispose === 'function' && !disposedTextures.has(texture)) {
-        texture.dispose()
-        disposedTextures.add(texture)
-      }
-    })
-    if (typeof material.dispose === 'function') {
-      material.dispose()
-    }
-    disposedMaterials.add(material)
-  }
+  // function disposeMaterial(material: any, disposedMaterials: Set<unknown>, disposedTextures: Set<unknown>) {
+  //   if (!material || disposedMaterials.has(material)) return
+  //   const textureKeys = [
+  //     'map',
+  //     'lightMap',
+  //     'aoMap',
+  //     'emissiveMap',
+  //     'bumpMap',
+  //     'normalMap',
+  //     'displacementMap',
+  //     'roughnessMap',
+  //     'metalnessMap',
+  //     'alphaMap',
+  //     'envMap',
+  //     'specularMap',
+  //     'gradientMap',
+  //     'matcap'
+  //   ]
+  //   textureKeys.forEach(key => {
+  //     const texture = material[key]
+  //     if (texture && typeof texture.dispose === 'function' && !disposedTextures.has(texture)) {
+  //       texture.dispose()
+  //       disposedTextures.add(texture)
+  //     }
+  //   })
+  //   if (typeof material.dispose === 'function') {
+  //     material.dispose()
+  //   }
+  //   disposedMaterials.add(material)
+  // }
 
-  function disposeObject(obj: Object3D, seen: Set<Object3D>, disposedGeometries: Set<unknown>, disposedMaterials: Set<unknown>, disposedTextures: Set<unknown>) {
-    if (seen.has(obj)) return
-    seen.add(obj)
+  // function disposeObject(obj: Object3D, seen: Set<Object3D>, disposedGeometries: Set<unknown>, disposedMaterials: Set<unknown>, disposedTextures: Set<unknown>) {
+  //   if (seen.has(obj)) return
+  //   seen.add(obj)
 
-    obj.children.slice().forEach(child => disposeObject(child, seen, disposedGeometries, disposedMaterials, disposedTextures))
+  //   obj.children.slice().forEach(child => disposeObject(child, seen, disposedGeometries, disposedMaterials, disposedTextures))
 
-    const anyObj = obj as any
-    if (anyObj.geometry && typeof anyObj.geometry.dispose === 'function' && !disposedGeometries.has(anyObj.geometry)) {
-      anyObj.geometry.dispose()
-      disposedGeometries.add(anyObj.geometry)
-    }
-    if (anyObj.material) {
-      if (Array.isArray(anyObj.material)) {
-        anyObj.material.forEach((mat: any) => disposeMaterial(mat, disposedMaterials, disposedTextures))
-      } else {
-        disposeMaterial(anyObj.material, disposedMaterials, disposedTextures)
-      }
-    }
-    const disposeFn = (anyObj as any).dispose
-    if (typeof disposeFn === 'function') {
-      disposeFn.call(anyObj)
-    }
-    if (obj.parent) {
-      obj.parent.remove(obj)
-    }
-  }
+  //   const anyObj = obj as any
+  //   if (anyObj.geometry && typeof anyObj.geometry.dispose === 'function' && !disposedGeometries.has(anyObj.geometry)) {
+  //     anyObj.geometry.dispose()
+  //     disposedGeometries.add(anyObj.geometry)
+  //   }
+  //   if (anyObj.material) {
+  //     if (Array.isArray(anyObj.material)) {
+  //       anyObj.material.forEach((mat: any) => disposeMaterial(mat, disposedMaterials, disposedTextures))
+  //     } else {
+  //       disposeMaterial(anyObj.material, disposedMaterials, disposedTextures)
+  //     }
+  //   }
+  //   const disposeFn = (anyObj as any).dispose
+  //   if (typeof disposeFn === 'function') {
+  //     disposeFn.call(anyObj)
+  //   }
+  //   if (obj.parent) {
+  //     obj.parent.remove(obj)
+  //   }
+  // }
 
   function clearScene() {
     useRenderer().stop();
@@ -633,7 +641,6 @@ export const useSceneStore = defineStore('scene', () => {
     selectionVersion,
     selectedObjectData,
     cureentObjectData,
-    setSelectedObject,
     setThreeScene,
     addSceneObjectData,
     updateSceneObjectData,

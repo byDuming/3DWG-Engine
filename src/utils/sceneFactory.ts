@@ -45,6 +45,7 @@ export interface SceneObjectInput {
   receiveShadow?: SceneObjectData['receiveShadow']
   frustumCulled?: SceneObjectData['frustumCulled']
   renderOrder?: SceneObjectData['renderOrder']
+  selectable?: SceneObjectData['selectable']
   childrenIds?: SceneObjectData['childrenIds']
   userData?: SceneObjectData['userData']
 }
@@ -507,6 +508,7 @@ export function createSceneObjectData(input: SceneObjectInput): SceneObjectData 
     receiveShadow: input.receiveShadow ?? false,
     frustumCulled: input.frustumCulled ?? true,
     renderOrder: input.renderOrder ?? 0,
+    selectable: input.selectable ?? true,
     childrenIds: input.childrenIds ?? [],
     userData: input.userData ?? {}
   }

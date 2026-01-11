@@ -176,7 +176,9 @@
 
   function handleTextureFileListChange(key: string, fileList: UploadFileInfo[]) {
     uploadFileLists[key] = fileList
-    const files = fileList.map(file => file.file).filter(Boolean) as File[]
+    const files = fileList
+      .map(item => item.file)
+      .filter((file): file is File => Boolean(file))
     if (!files.length) return
 
     const isEnvMap = key === 'envMap'
@@ -192,7 +194,7 @@
       return
     }
 
-    const file = files[0]
+    const file = files[0]!
     textureFileNames[key] = file.name
     textureFileLists[key] = []
     updateMaterialTextureName(key, file.name)
@@ -231,6 +233,12 @@
     if (list && list.length) return list.join(', ')
     return textureFileNames[key] ?? ''
   }
+
+  const envMapArray = computed(() => {
+    const envMap = mapMaterial.value?.envMap
+    return Array.isArray(envMap) ? envMap : []
+  })
+  const envMapPreviewList = computed(() => envMapArray.value.filter(isPreviewableTexture))
 
   function isPreviewableTexture(value?: string) {
     if (!value) return false
@@ -427,12 +435,11 @@
           >
             <n-button size="small" class="texture-button">{{ getTextureLabel('envMap') || '选择贴图' }}</n-button>
           </n-upload>
-          <n-image-group v-if="Array.isArray(mapMaterial?.envMap)">
+          <n-image-group v-if="envMapPreviewList.length">
             <div class="texture-preview-row">
               <n-image
-                v-for="(url, index) in mapMaterial?.envMap"
+                v-for="(url, index) in envMapPreviewList"
                 :key="index"
-                v-if="isPreviewableTexture(url)"
                 :src="url"
                 class="texture-preview-container"
                 :img-props="{ class: 'texture-preview-thumb' }"

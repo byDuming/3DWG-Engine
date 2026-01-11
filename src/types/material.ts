@@ -123,6 +123,12 @@ interface BaseMaterialData {
   minFilter?: TextureFilterType;
 
   /**
+   * Alpha test switch (UI uses boolean).
+   * @default false
+   */
+  alphaTest?: boolean;
+
+  /**
    * 贴图文件名映射（用于UI显示与持久化）
    */
   textureNames?: Record<string, string>;
