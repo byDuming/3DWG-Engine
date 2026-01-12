@@ -1,5 +1,20 @@
 import { ref, shallowRef, onBeforeUnmount, watch } from 'vue'
-import { Scene, WebGPURenderer, PerspectiveCamera, Color } from 'three/webgpu'
+import { Scene, PerspectiveCamera, Color } from 'three'
+import { WebGPURenderer } from 'three/webgpu'
+import {
+  WebGLRenderer,
+  NoToneMapping,
+  LinearToneMapping,
+  ReinhardToneMapping,
+  CineonToneMapping,
+  ACESFilmicToneMapping,
+  SRGBColorSpace,
+  LinearSRGBColorSpace,
+  BasicShadowMap,
+  PCFShadowMap,
+  PCFSoftShadowMap,
+  VSMShadowMap
+} from 'three'
 import { Raycaster, Vector2, Box3, Vector3, Object3D } from 'three'
 import { useSceneStore } from '@/stores/modules/useScene.store.ts'
 import { MapControls } from 'three/addons/controls/MapControls.js'
@@ -80,8 +95,21 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
 
   function dispose() {
     stop()
+    const pendingTransform = detachTransformControls()
+    const pendingControls = controls.value
+    controls.value = null
     try {
       sceneStore.webGPURenderer?.dispose()
+    } catch (e) {
+      // ignore
+    }
+    try {
+      pendingTransform?.dispose()
+    } catch (e) {
+      // ignore
+    }
+    try {
+      pendingControls?.dispose()
     } catch (e) {
       // ignore
     }
@@ -91,7 +119,6 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
     sceneStore.webGPURenderer = null
     sceneStore.threeScene = null
     camera.value = null
-    transformControls.value?.dispose()
     transformControls.value = null
   }
 
@@ -265,18 +292,119 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
     }
     sceneStore.setThreeScene(scene)
 
-    const ensuredCamera = ensureCamera()
+    ensureCamera()
 
-    sceneStore.webGPURenderer = new WebGPURenderer({ antialias: opts.antialias ?? true })
-    if (container.value) container.value.appendChild(sceneStore.webGPURenderer.domElement)
+    rebuildRenderer()
 
-    if (ensuredCamera && container.value) {
-      controls.value = new MapControls(ensuredCamera, container.value)
+    window.addEventListener('resize', resize)
+  }
+
+  watch(() => sceneStore.selectedObjectId, (id) => {
+    attachTransformControl(id)
+  }, { immediate: true })
+
+  watch(() => sceneStore.selectionVersion, () => {
+    attachTransformControl(sceneStore.selectedObjectId)
+  })
+
+  watch(() => sceneStore.transformMode, (mode) => {
+    transformControls.value?.setMode(mode)
+  })
+
+  watch(() => sceneStore.transformSpace, (space) => {
+    transformControls.value?.setSpace(space)
+  })
+
+  watch(() => sceneStore.rendererSettings, () => {
+    applyRendererSettings()
+  }, { deep: true })
+
+  watch(() => sceneStore.rendererSettings.rendererType, () => {
+    rebuildRenderer()
+  })
+
+  function applyRendererSettings() {
+    const renderer = sceneStore.webGPURenderer
+    if (!renderer) return
+    const settings = sceneStore.rendererSettings
+    const toneMappingMap: Record<string, number> = {
+      none: NoToneMapping,
+      linear: LinearToneMapping,
+      reinhard: ReinhardToneMapping,
+      cineon: CineonToneMapping,
+      acesFilmic: ACESFilmicToneMapping
+    }
+    const colorSpaceMap: Record<string, string> = {
+      srgb: SRGBColorSpace,
+      linear: LinearSRGBColorSpace
+    }
+    if (settings.toneMapping in toneMappingMap) {
+      renderer.toneMapping = toneMappingMap[settings.toneMapping]
+    }
+    if (typeof settings.toneMappingExposure === 'number') {
+      renderer.toneMappingExposure = settings.toneMappingExposure
+    }
+    if (settings.outputColorSpace in colorSpaceMap) {
+      ;(renderer as any).outputColorSpace = colorSpaceMap[settings.outputColorSpace]
+    }
+    if ((renderer as any).isWebGLRenderer) {
+      ;(renderer as any).useLegacyLights = settings.useLegacyLights
+    }
+    if ((renderer as any).shadowMap) {
+      ;(renderer as any).shadowMap.enabled = settings.shadows
+    }
+    if ((renderer as any).shadowMap && (renderer as any).isWebGLRenderer) {
+      const shadowTypeMap: Record<string, number> = {
+        basic: BasicShadowMap,
+        pcf: PCFShadowMap,
+        pcfSoft: PCFSoftShadowMap,
+        vsm: VSMShadowMap
+      }
+      if (settings.shadowType in shadowTypeMap) {
+        ;(renderer as any).shadowMap.type = shadowTypeMap[settings.shadowType]
+      }
+    }
+  }
+
+  function rebuildRenderer() {
+    stop()
+    const pendingTransform = detachTransformControls()
+    const pendingControls = controls.value
+    controls.value = null
+    if (sceneStore.webGPURenderer) {
+      try {
+        sceneStore.webGPURenderer.dispose()
+      } catch (e) {
+        // ignore
+      }
+      const dom = sceneStore.webGPURenderer.domElement
+      dom?.parentElement?.removeChild(dom)
+      sceneStore.webGPURenderer = null
+    }
+    try {
+      pendingTransform?.dispose()
+    } catch (e) {
+      // ignore
+    }
+    try {
+      pendingControls?.dispose()
+    } catch (e) {
+      // ignore
     }
 
-    const dom = sceneStore.webGPURenderer.domElement
-    if (ensuredCamera) {
-      transformControls.value = new TransformControls(ensuredCamera, dom)
+    if (!container.value) return
+    const antialias = opts.antialias ?? sceneStore.rendererSettings.antialias
+    if (sceneStore.rendererSettings.rendererType === 'webgl') {
+      sceneStore.webGPURenderer = new WebGLRenderer({ antialias })
+    } else {
+      sceneStore.webGPURenderer = new WebGPURenderer({ antialias })
+    }
+    container.value.appendChild(sceneStore.webGPURenderer.domElement)
+
+    if (camera.value) {
+      controls.value = new MapControls(camera.value, container.value)
+
+      transformControls.value = new TransformControls(camera.value, sceneStore.webGPURenderer.domElement)
       transformControls.value.addEventListener('dragging-changed', (event) => {
         if (controls.value) controls.value.enabled = !event.value
       })
@@ -295,28 +423,24 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
 
       const gizmo = transformControls.value.getHelper()
       sceneStore.threeScene?.add(gizmo)
+      attachTransformControl(sceneStore.selectedObjectId)
+      transformControls.value.setMode(sceneStore.transformMode)
+      transformControls.value.setSpace(sceneStore.transformSpace)
     }
-
+    applyRendererSettings()
     resize()
-    window.addEventListener('resize', resize)
     start()
   }
 
-  watch(() => sceneStore.selectedObjectId, (id) => {
-    attachTransformControl(id)
-  }, { immediate: true })
-
-  watch(() => sceneStore.selectionVersion, () => {
-    attachTransformControl(sceneStore.selectedObjectId)
-  })
-
-  watch(() => sceneStore.transformMode, (mode) => {
-    transformControls.value?.setMode(mode)
-  })
-
-  watch(() => sceneStore.transformSpace, (space) => {
-    transformControls.value?.setSpace(space)
-  })
+  function detachTransformControls() {
+    if (!transformControls.value) return null
+    const helper = transformControls.value.getHelper()
+    sceneStore.threeScene?.remove(helper)
+    transformControls.value.detach()
+    const pending = transformControls.value
+    transformControls.value = null
+    return pending
+  }
 
   onBeforeUnmount(() => {
     window.removeEventListener('resize', resize)

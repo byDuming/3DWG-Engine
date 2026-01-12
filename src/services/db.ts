@@ -1,5 +1,5 @@
-// src/services/db.ts
 import type { SceneObjectData } from '@/interfaces/sceneInterface'
+import type { AssetRef } from '@/types/asset'
 import { init, getInstance } from 'ts-indexdb'
 
 export type SceneRow = {
@@ -8,45 +8,51 @@ export type SceneRow = {
   aIds: number
   version: number
   objectDataList: SceneObjectData[]
+  assets?: AssetRef[]
+  rendererSettings?: Record<string, unknown>
   updatedAt: Date
   createdAt: Date
 }
 
 export async function initDB(): Promise<{ inst: ReturnType<typeof getInstance>; sceneData: SceneRow }> {
-  await init({ dbName: '3dwg-engine-db', version: 1, tables: [{ tableName: 'sceneData', option: { keyPath: "id", autoIncrement: true }, // 指明主键为id
-    indexs: [    // 数据库索引
-        {
-            key: "id",
-            option: {
-                unique: true
-            }
-        },
-        {
-            key: "name"
-        },
-        {
-            key: "aIds"
-        },
-        {
-            key: "version"
-        },
-        {
-            key: "objectDataList"
-        },
-        {
-            key: "updatedAt"
-        },
-        {
-            key: "createdAt"
-        }
-    ] }] })
+  await init({
+    dbName: '3dwg-engine-db',
+    version: 1,
+    tables: [
+      {
+        tableName: 'sceneData',
+        option: { keyPath: 'id', autoIncrement: true },
+        indexs: [
+          { key: 'id', option: { unique: true } },
+          { key: 'name' },
+          { key: 'aIds' },
+          { key: 'version' },
+          { key: 'objectDataList' },
+          { key: 'assets' },
+          { key: 'updatedAt' },
+          { key: 'createdAt' }
+        ]
+      }
+    ]
+  })
   const inst = getInstance()
   const rows = await inst.queryAll({ tableName: 'sceneData' })
   if (!rows?.length) {
     const sceneData: SceneRow = {
       name: '默认场景',
-      aIds: 3, // 从3开始预留给后续新增
+      aIds: 3,
       version: 1,
+      assets: [],
+      rendererSettings: {
+        rendererType: 'webgpu',
+        antialias: true,
+        shadows: true,
+        shadowType: 'pcf',
+        toneMapping: 'acesFilmic',
+        toneMappingExposure: 1,
+        outputColorSpace: 'srgb',
+        useLegacyLights: false
+      },
       objectDataList: [
         {
           id: 'Scene',
@@ -129,14 +135,22 @@ export async function initDB(): Promise<{ inst: ReturnType<typeof getInstance>; 
     await inst.insert({ tableName: 'sceneData', data: sceneData })
     return { inst, sceneData }
   }
-  
+
   const first = rows[0] as any
   const objectDataList: SceneObjectData[] =
     typeof first.objectDataList === 'string'
       ? JSON.parse(first.objectDataList)
       : first.objectDataList ?? []
+  const assets =
+    typeof first.assets === 'string'
+      ? JSON.parse(first.assets)
+      : first.assets ?? []
+  const rendererSettings =
+    typeof first.rendererSettings === 'string'
+      ? JSON.parse(first.rendererSettings)
+      : first.rendererSettings
 
-  return { inst, sceneData: { ...first, objectDataList } }
+  return { inst, sceneData: { ...first, objectDataList, assets, rendererSettings } }
 }
 
 export function getDB() {

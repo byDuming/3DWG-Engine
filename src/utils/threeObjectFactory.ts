@@ -47,9 +47,22 @@ import {
   FrontSide,
   BackSide,
   DoubleSide,
+  NormalBlending,
+  AdditiveBlending,
+  SubtractiveBlending,
+  MultiplyBlending,
+  CustomBlending,
   RepeatWrapping,
   ClampToEdgeWrapping,
   MirroredRepeatWrapping,
+  NeverDepth,
+  AlwaysDepth,
+  LessDepth,
+  LessEqualDepth,
+  EqualDepth,
+  GreaterDepth,
+  GreaterEqualDepth,
+  NotEqualDepth,
   NearestFilter,
   LinearFilter,
   NearestMipmapNearestFilter,
@@ -78,7 +91,7 @@ import {
   SkeletonHelper,
   SpotLightHelper,
   Vector3
-} from 'three/webgpu'
+} from 'three'
 
 import { CubeTextureLoader } from 'three'
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js'
@@ -111,6 +124,23 @@ const sideMap: Record<string, number> = {
   front: FrontSide,
   back: BackSide,
   double: DoubleSide
+}
+const blendingMap: Record<string, number> = {
+  normal: NormalBlending,
+  additive: AdditiveBlending,
+  subtractive: SubtractiveBlending,
+  multiply: MultiplyBlending,
+  custom: CustomBlending
+}
+const depthFuncMap: Record<string, number> = {
+  never: NeverDepth,
+  always: AlwaysDepth,
+  less: LessDepth,
+  lequal: LessEqualDepth,
+  equal: EqualDepth,
+  gequal: GreaterEqualDepth,
+  greater: GreaterDepth,
+  notequal: NotEqualDepth
 }
 
 function getTexture(source?: string) {
@@ -198,6 +228,13 @@ function applyCommonMaterialProps(material: any, mat: MaterialData) {
   if (mat.depthTest !== undefined) material.depthTest = mat.depthTest
   if (mat.depthWrite !== undefined) material.depthWrite = mat.depthWrite
   if (mat.side && sideMap[mat.side]) material.side = sideMap[mat.side]
+  if ((mat as any).blending && blendingMap[(mat as any).blending]) material.blending = blendingMap[(mat as any).blending]
+  if ((mat as any).depthFunc && depthFuncMap[(mat as any).depthFunc]) material.depthFunc = depthFuncMap[(mat as any).depthFunc]
+  if ((mat as any).premultipliedAlpha !== undefined) material.premultipliedAlpha = (mat as any).premultipliedAlpha
+  if ((mat as any).dithering !== undefined) material.dithering = (mat as any).dithering
+  if ((mat as any).polygonOffset !== undefined) material.polygonOffset = (mat as any).polygonOffset
+  if ((mat as any).polygonOffsetFactor !== undefined) material.polygonOffsetFactor = (mat as any).polygonOffsetFactor
+  if ((mat as any).polygonOffsetUnits !== undefined) material.polygonOffsetUnits = (mat as any).polygonOffsetUnits
   if (mat.wireframe !== undefined) material.wireframe = mat.wireframe
   if (mat.wireframeLinewidth !== undefined && 'wireframeLinewidth' in material) {
     material.wireframeLinewidth = mat.wireframeLinewidth
@@ -210,6 +247,8 @@ function applyMaterialSpecificProps(material: any, mat: MaterialData) {
   if (anyMat.emissive && material.emissive) material.emissive.set(anyMat.emissive)
   if (anyMat.emissiveIntensity !== undefined && 'emissiveIntensity' in material) material.emissiveIntensity = anyMat.emissiveIntensity
   if (anyMat.envMapIntensity !== undefined && 'envMapIntensity' in material) material.envMapIntensity = anyMat.envMapIntensity
+  if (anyMat.lightMapIntensity !== undefined && 'lightMapIntensity' in material) material.lightMapIntensity = anyMat.lightMapIntensity
+  if (anyMat.bumpScale !== undefined && 'bumpScale' in material) material.bumpScale = anyMat.bumpScale
   if (anyMat.normalScale !== undefined && material.normalScale) material.normalScale.set(anyMat.normalScale, anyMat.normalScale)
   if (anyMat.displacementScale !== undefined && 'displacementScale' in material) material.displacementScale = anyMat.displacementScale
   if (anyMat.displacementBias !== undefined && 'displacementBias' in material) material.displacementBias = anyMat.displacementBias
@@ -223,6 +262,19 @@ function applyMaterialSpecificProps(material: any, mat: MaterialData) {
   if (anyMat.clearcoatNormalScale !== undefined && material.clearcoatNormalScale) {
     material.clearcoatNormalScale.set(anyMat.clearcoatNormalScale, anyMat.clearcoatNormalScale)
   }
+  if (anyMat.sheen !== undefined && 'sheen' in material) material.sheen = anyMat.sheen
+  if (anyMat.sheenColor && material.sheenColor) material.sheenColor.set(anyMat.sheenColor)
+  if (anyMat.sheenRoughness !== undefined && 'sheenRoughness' in material) material.sheenRoughness = anyMat.sheenRoughness
+  if (anyMat.iridescence !== undefined && 'iridescence' in material) material.iridescence = anyMat.iridescence
+  if (anyMat.iridescenceIOR !== undefined && 'iridescenceIOR' in material) material.iridescenceIOR = anyMat.iridescenceIOR
+  if (anyMat.iridescenceThicknessRange && material.iridescenceThicknessRange) {
+    const range = anyMat.iridescenceThicknessRange as [number, number]
+    material.iridescenceThicknessRange.set(range[0], range[1])
+  }
+  if (anyMat.specularIntensity !== undefined && 'specularIntensity' in material) material.specularIntensity = anyMat.specularIntensity
+  if (anyMat.specularColor && material.specularColor) material.specularColor.set(anyMat.specularColor)
+  if (anyMat.attenuationColor && material.attenuationColor) material.attenuationColor.set(anyMat.attenuationColor)
+  if (anyMat.attenuationDistance !== undefined && 'attenuationDistance' in material) material.attenuationDistance = anyMat.attenuationDistance
   if (anyMat.ior !== undefined && 'ior' in material) material.ior = anyMat.ior
   if (anyMat.transmission !== undefined && 'transmission' in material) material.transmission = anyMat.transmission
   if (anyMat.thickness !== undefined && 'thickness' in material) material.thickness = anyMat.thickness
@@ -245,6 +297,8 @@ function applyMaps(material: any, mat: MaterialData) {
   const roughnessMap = getTexture((mat as any).roughnessMap)
   const metalnessMap = getTexture((mat as any).metalnessMap)
   const aoMap = getTexture((mat as any).aoMap)
+  const lightMap = getTexture((mat as any).lightMap)
+  const bumpMap = getTexture((mat as any).bumpMap)
   const emissiveMap = getTexture((mat as any).emissiveMap)
   const specularMap = getTexture((mat as any).specularMap)
   const gradientMap = getTexture((mat as any).gradientMap)
@@ -253,6 +307,14 @@ function applyMaps(material: any, mat: MaterialData) {
   const thicknessMap = getTexture((mat as any).thicknessMap)
   const anisotropyMap = getTexture((mat as any).anisotropyMap)
   const clearcoatNormalMap = getTexture((mat as any).clearcoatNormalMap)
+  const clearcoatMap = getTexture((mat as any).clearcoatMap)
+  const clearcoatRoughnessMap = getTexture((mat as any).clearcoatRoughnessMap)
+  const sheenColorMap = getTexture((mat as any).sheenColorMap)
+  const sheenRoughnessMap = getTexture((mat as any).sheenRoughnessMap)
+  const iridescenceMap = getTexture((mat as any).iridescenceMap)
+  const iridescenceThicknessMap = getTexture((mat as any).iridescenceThicknessMap)
+  const specularIntensityMap = getTexture((mat as any).specularIntensityMap)
+  const specularColorMap = getTexture((mat as any).specularColorMap)
 
   const setMap = (key: string, texture: Texture | null) => {
     if (texture) applyTextureSettings(texture, mat)
@@ -267,6 +329,8 @@ function applyMaps(material: any, mat: MaterialData) {
   setMap('roughnessMap', roughnessMap)
   setMap('metalnessMap', metalnessMap)
   setMap('aoMap', aoMap)
+  setMap('lightMap', lightMap)
+  setMap('bumpMap', bumpMap)
   setMap('emissiveMap', emissiveMap)
   setMap('specularMap', specularMap)
   setMap('gradientMap', gradientMap)
@@ -275,6 +339,14 @@ function applyMaps(material: any, mat: MaterialData) {
   setMap('thicknessMap', thicknessMap)
   setMap('anisotropyMap', anisotropyMap)
   setMap('clearcoatNormalMap', clearcoatNormalMap)
+  setMap('clearcoatMap', clearcoatMap)
+  setMap('clearcoatRoughnessMap', clearcoatRoughnessMap)
+  setMap('sheenColorMap', sheenColorMap)
+  setMap('sheenRoughnessMap', sheenRoughnessMap)
+  setMap('iridescenceMap', iridescenceMap)
+  setMap('iridescenceThicknessMap', iridescenceThicknessMap)
+  setMap('specularIntensityMap', specularIntensityMap)
+  setMap('specularColorMap', specularColorMap)
 }
 
 /** Sync Three transform from SceneObjectData */
@@ -318,6 +390,26 @@ export function applyLightSettings(light: any, data: SceneObjectData) {
   if (light.isHemisphereLight) {
     if (payload.skyColor && light.color) light.color.set(payload.skyColor)
     if (payload.groundColor && light.groundColor) light.groundColor.set(payload.groundColor)
+  }
+  if (light.isDirectionalLight && payload.shadow) {
+    const shadow = payload.shadow
+    if (shadow.mapSize) {
+      const size = shadow.mapSize as [number, number]
+      light.shadow.mapSize.set(size[0], size[1])
+      if (light.shadow.map) {
+        light.shadow.map.needsUpdate = true
+      }
+    }
+    if (shadow.camera) {
+      const camera = shadow.camera
+      if (camera.left !== undefined) light.shadow.camera.left = camera.left
+      if (camera.right !== undefined) light.shadow.camera.right = camera.right
+      if (camera.top !== undefined) light.shadow.camera.top = camera.top
+      if (camera.bottom !== undefined) light.shadow.camera.bottom = camera.bottom
+      if (camera.near !== undefined) light.shadow.camera.near = camera.near
+      if (camera.far !== undefined) light.shadow.camera.far = camera.far
+      light.shadow.camera.updateProjectionMatrix()
+    }
   }
 }
 
@@ -560,11 +652,13 @@ function createMaterialFromData(mat?: MaterialData) {
       const material = new PointsMaterial({ color: baseColor, size: mat.size ?? 1, sizeAttenuation: mat.sizeAttenuation ?? true })
       applyCommonMaterialProps(material, mat)
       applyMaterialSpecificProps(material, mat)
+      applyMaps(material, mat)
       return material
     }
     case 'sprite': {
       const material = new SpriteMaterial({ color: baseColor })
       applyCommonMaterialProps(material, mat)
+      applyMaps(material, mat)
       return material
     }
     case 'shadow': {

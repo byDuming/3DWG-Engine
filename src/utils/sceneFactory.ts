@@ -28,12 +28,13 @@ import type {
   SpriteMaterialData,
   ShadowMaterialData
 } from '@/types/material'
-import { MaterialSide, TextureFilter, TextureWrapping } from '@/types/material-types.ts'
+import { MaterialSide, TextureFilter, TextureWrapping, MaterialBlending, DepthFunc } from '@/types/material-types.ts'
 
 export interface SceneObjectInput {
   id?: string
   type: SceneObjectData['type']
   name?: string
+  assetId?: SceneObjectData['assetId']
   parentId?: string
   mesh?: SceneObjectData['mesh']
   helper?: SceneObjectData['helper']
@@ -246,7 +247,16 @@ function normalizeMaterial(input?: MaterialData): MaterialData {
     wrapS: TextureWrapping.ClampToEdge,
     wrapT: TextureWrapping.ClampToEdge,
     magFilter: TextureFilter.Linear,
-    minFilter: TextureFilter.LinearMipmapLinear
+    minFilter: TextureFilter.LinearMipmapLinear,
+    blending: MaterialBlending.Normal,
+    depthFunc: DepthFunc.LessEqual,
+    premultipliedAlpha: false,
+    dithering: false,
+    polygonOffset: false,
+    polygonOffsetFactor: 0,
+    polygonOffsetUnits: 0,
+    lightMapIntensity: 1,
+    bumpScale: 1
   }
 
   if (!input) {
@@ -352,6 +362,18 @@ function normalizeMaterial(input?: MaterialData): MaterialData {
         anisotropy: 0,
         anisotropyRotation: 0,
         clearcoatNormalScale: 1,
+        clearcoatRoughnessMap: undefined,
+        clearcoatMap: undefined,
+        sheen: 0,
+        sheenColor: '#ffffff',
+        sheenRoughness: 1,
+        iridescence: 0,
+        iridescenceIOR: 1.3,
+        iridescenceThicknessRange: [100, 400],
+        specularIntensity: 1,
+        specularColor: '#ffffff',
+        attenuationColor: '#ffffff',
+        attenuationDistance: 0,
         ...data
       }
       return result
@@ -361,6 +383,8 @@ function normalizeMaterial(input?: MaterialData): MaterialData {
       const result: MeshToonMaterialData = {
         type: 'toon',
         ...baseDefaults,
+        emissive: '#000000',
+        emissiveIntensity: 1,
         envMapIntensity: 1,
         normalScale: 1,
         displacementScale: 1,
@@ -421,6 +445,7 @@ function normalizeMaterial(input?: MaterialData): MaterialData {
       const result: SpriteMaterialData = {
         type: 'sprite',
         ...baseDefaults,
+        sizeAttenuation: true,
         ...data
       }
       return result
@@ -450,6 +475,29 @@ function normalizeMaterial(input?: MaterialData): MaterialData {
         alphaTest: false
       }
       return fallback
+    }
+  }
+}
+
+function normalizeLightUserData(input?: SceneObjectData['userData']) {
+  const lightType = (input as any)?.lightType
+  if (lightType !== 'directionalLight') return input ?? {}
+  const shadow = (input as any)?.shadow ?? {}
+  const camera = shadow.camera ?? {}
+  return {
+    ...input,
+    shadow: {
+      ...shadow,
+      mapSize: shadow.mapSize ?? [2048, 2048],
+      camera: {
+        ...camera,
+        left: camera.left ?? -50,
+        right: camera.right ?? 50,
+        top: camera.top ?? 50,
+        bottom: camera.bottom ?? -50,
+        near: camera.near ?? 0.5,
+        far: camera.far ?? 200
+      }
     }
   }
 }
@@ -493,6 +541,7 @@ export function createSceneObjectData(input: SceneObjectInput): SceneObjectData 
     id: input.id ?? '',
     type: input.type,
     name: input.name,
+    assetId: input.assetId,
     parentId: input.parentId,
     mesh,
     helper: input.helper,
@@ -510,6 +559,6 @@ export function createSceneObjectData(input: SceneObjectInput): SceneObjectData 
     renderOrder: input.renderOrder ?? 0,
     selectable: input.selectable ?? true,
     childrenIds: input.childrenIds ?? [],
-    userData: input.userData ?? {}
+    userData: normalizeLightUserData(input.userData ?? {})
   }
 }

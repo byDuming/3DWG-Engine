@@ -25,6 +25,24 @@
     if (!id) return
     sceneStore.updateSceneObjectData(id, { frustumCulled } as any)
   }
+
+  function setHorizontalRotation() {
+    const id = sceneStore.selectedObjectId
+    if (!id) return
+    const current = sceneStore.cureentObjectData?.transform.rotation ?? [0, 0, 0]
+    const snap = (value: number) => {
+      const step = Math.PI / 2
+      return Math.round(value / step) * step
+    }
+    const nextRotation: [number, number, number] = [
+      snap(current[0]),
+      snap(current[1]),
+      snap(current[2])
+    ]
+    const xIsVertical = Math.abs(nextRotation[0]) === Math.PI / 2
+    nextRotation[0] = xIsVertical ? 0 : -Math.PI / 2
+    sceneStore.updateSceneObjectData(id, { transform: { rotation: nextRotation } } as any)
+  }
 </script>
 
 <template>
@@ -110,6 +128,12 @@
           @update:value="(v:number) => updateTransform('rotation', 2, v)"
           :show-button="false"
         />
+      </n-gi>
+    </n-grid>
+    <n-grid x-gap="6" :cols="11">
+      <n-gi class="gid-item" :span="2"></n-gi>
+      <n-gi class="gid-item" :span="9">
+        <n-button size="tiny" @click="setHorizontalRotation">水平</n-button>
       </n-gi>
     </n-grid>
 

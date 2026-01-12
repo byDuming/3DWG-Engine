@@ -1,6 +1,6 @@
 // types/material.ts
 
-import type { MaterialSideType, TextureFilterType, TextureWrappingType } from "./material-types.ts";
+import type { MaterialSideType, TextureFilterType, TextureWrappingType, MaterialBlendingType, DepthFuncType } from "./material-types.ts";
 
 /**
  * 材质数据联合类型，支持所有基础材质类型
@@ -123,6 +123,41 @@ interface BaseMaterialData {
   minFilter?: TextureFilterType;
 
   /**
+   * Material blending mode.
+   */
+  blending?: MaterialBlendingType;
+
+  /**
+   * Depth function.
+   */
+  depthFunc?: DepthFuncType;
+
+  /**
+   * Premultiplied alpha.
+   */
+  premultipliedAlpha?: boolean;
+
+  /**
+   * Dithering.
+   */
+  dithering?: boolean;
+
+  /**
+   * Polygon offset.
+   */
+  polygonOffset?: boolean;
+
+  /**
+   * Polygon offset factor.
+   */
+  polygonOffsetFactor?: number;
+
+  /**
+   * Polygon offset units.
+   */
+  polygonOffsetUnits?: number;
+
+  /**
    * Alpha test switch (UI uses boolean).
    * @default false
    */
@@ -170,6 +205,26 @@ interface MapMaterialData extends BaseMaterialData {
    * @minimum 0
    */
   envMapIntensity?: number;
+
+  /**
+   * Light map.
+   */
+  lightMap?: string;
+
+  /**
+   * Light map intensity.
+   */
+  lightMapIntensity?: number;
+
+  /**
+   * Bump map.
+   */
+  bumpMap?: string;
+
+  /**
+   * Bump scale.
+   */
+  bumpScale?: number;
 }
 
 // ==================== 第二层：法线/位移贴图支持 ====================
@@ -430,12 +485,31 @@ export interface MeshPhysicalMaterialData extends Omit<MeshStandardMaterialData,
    * @default 1
    */
   clearcoatNormalScale?: number;
+
+  clearcoatMap?: string;
+  clearcoatRoughnessMap?: string;
+  sheen?: number;
+  sheenColor?: string;
+  sheenRoughness?: number;
+  sheenColorMap?: string;
+  sheenRoughnessMap?: string;
+  iridescence?: number;
+  iridescenceIOR?: number;
+  iridescenceThicknessRange?: [number, number];
+  iridescenceMap?: string;
+  iridescenceThicknessMap?: string;
+  specularIntensity?: number;
+  specularColor?: string;
+  specularIntensityMap?: string;
+  specularColorMap?: string;
+  attenuationColor?: string;
+  attenuationDistance?: number;
 }
 
 /**
  * 卡通材质参数
  */
-export interface MeshToonMaterialData extends NormalDisplacementMaterialData {
+export interface MeshToonMaterialData extends EmissiveMaterialData {
   type: 'toon';
   
   /** 
@@ -521,6 +595,9 @@ export interface LineDashedMaterialData extends Omit<LineBasicMaterialData, 'typ
  */
 export interface PointsMaterialData extends BaseMaterialData {
   type: 'points';
+
+  map?: string;
+  alphaMap?: string;
   
   /** 
    * 点大小
@@ -539,14 +616,11 @@ export interface PointsMaterialData extends BaseMaterialData {
 /**
  * 精灵材质参数
  */
-export interface SpriteMaterialData extends BaseMaterialData {
+export interface SpriteMaterialData extends MapMaterialData {
   type: 'sprite';
-  // 特有属性：无（继承BaseMaterialData的所有属性）
+  sizeAttenuation?: boolean;
 }
 
-/**
- * 阴影材质参数
- */
 export interface ShadowMaterialData extends BaseMaterialData {
   type: 'shadow';
   // 特有属性：无（继承BaseMaterialData的所有属性）

@@ -21,9 +21,12 @@
   const material = computed(() => sceneStore.cureentObjectData?.mesh?.material as MaterialData | undefined)
   const materialType = computed(() => material.value?.type)
 
-  const showMapFields = computed(() => ['basic', 'lambert', 'phong', 'standard', 'physical', 'toon'].includes(materialType.value ?? ''))
+  const showMapFields = computed(() => ['basic', 'lambert', 'phong', 'standard', 'physical', 'toon', 'sprite', 'points'].includes(materialType.value ?? ''))
+  const showEnvMap = computed(() => ['basic', 'lambert', 'phong', 'standard', 'physical', 'toon'].includes(materialType.value ?? ''))
+  const showLightMap = computed(() => ['basic', 'lambert', 'phong', 'standard', 'physical', 'toon'].includes(materialType.value ?? ''))
+  const showBumpMap = computed(() => ['basic', 'lambert', 'phong', 'standard', 'physical', 'toon'].includes(materialType.value ?? ''))
   const showNormalDisplacement = computed(() => ['lambert', 'phong', 'standard', 'physical', 'toon'].includes(materialType.value ?? ''))
-  const showEmissive = computed(() => ['lambert', 'phong', 'standard', 'physical'].includes(materialType.value ?? ''))
+  const showEmissive = computed(() => ['lambert', 'phong', 'standard', 'physical', 'toon'].includes(materialType.value ?? ''))
   const showAo = computed(() => ['standard', 'physical'].includes(materialType.value ?? ''))
   const showStandard = computed(() => ['standard', 'physical'].includes(materialType.value ?? ''))
   const showPhysical = computed(() => materialType.value === 'physical')
@@ -33,6 +36,7 @@
   const showLineBasic = computed(() => materialType.value === 'lineBasic')
   const showLineDashed = computed(() => materialType.value === 'lineDashed')
   const showPoints = computed(() => materialType.value === 'points')
+  const showSprite = computed(() => materialType.value === 'sprite')
 
   type MapLikeMaterial = MaterialData & {
     map?: string
@@ -40,6 +44,18 @@
     envMap?: string | string[]
     envMapIntensity?: number
     envMapType?: 'equirect' | 'hdr' | 'cube'
+    lightMap?: string
+    lightMapIntensity?: number
+    bumpMap?: string
+    bumpScale?: number
+    clearcoatMap?: string
+    clearcoatRoughnessMap?: string
+    sheenColorMap?: string
+    sheenRoughnessMap?: string
+    iridescenceMap?: string
+    iridescenceThicknessMap?: string
+    specularIntensityMap?: string
+    specularColorMap?: string
     textureNames?: Record<string, string>
   }
 
@@ -70,6 +86,7 @@
   const lineBasicMaterial = computed(() => material.value?.type === 'lineBasic' ? (material.value as LineBasicMaterialData) : null)
   const lineDashedMaterial = computed(() => material.value?.type === 'lineDashed' ? (material.value as LineDashedMaterialData) : null)
   const pointsMaterial = computed(() => material.value?.type === 'points' ? (material.value as PointsMaterialData) : null)
+  const spriteMaterial = computed(() => material.value?.type === 'sprite' ? material.value : null)
   const mapMaterial = computed(() => showMapFields.value ? (material.value as MapLikeMaterial) : null)
   const normalDisplacementMaterial = computed(() => showNormalDisplacement.value ? (material.value as NormalDisplacementMaterial) : null)
   const emissiveMaterial = computed(() => showEmissive.value ? (material.value as EmissiveMaterial) : null)
@@ -107,6 +124,23 @@
     { label: 'bevel', value: 'bevel' },
     { label: 'miter', value: 'miter' }
   ]
+  const blendingOptions = [
+    { label: 'normal', value: 'normal' },
+    { label: 'additive', value: 'additive' },
+    { label: 'subtractive', value: 'subtractive' },
+    { label: 'multiply', value: 'multiply' },
+    { label: 'custom', value: 'custom' }
+  ]
+  const depthFuncOptions = [
+    { label: 'never', value: 'never' },
+    { label: 'always', value: 'always' },
+    { label: 'less', value: 'less' },
+    { label: 'lequal', value: 'lequal' },
+    { label: 'equal', value: 'equal' },
+    { label: 'gequal', value: 'gequal' },
+    { label: 'greater', value: 'greater' },
+    { label: 'notequal', value: 'notequal' }
+  ]
   const materialTypeOptions = [
     { label: '基础材质', value: 'basic' },
     { label: 'Lambert', value: 'lambert' },
@@ -135,6 +169,13 @@
 
   function updateMaterialNumber(key: string, value: number | null) {
     updateMaterial({ [key]: Number(value ?? 0) })
+  }
+
+  function updateMaterialVec2(key: string, axis: 0 | 1, value: number | null, fallback: [number, number]) {
+    const current = (material.value as any)?.[key] ?? fallback
+    const next: [number, number] = [Number(current[0] ?? fallback[0]), Number(current[1] ?? fallback[1])]
+    next[axis] = Number(value ?? 0)
+    updateMaterial({ [key]: next })
   }
 
   function updateMaterialBoolean(key: string, value: boolean) {
@@ -316,6 +357,58 @@
       </n-gi>
     </n-grid>
     <n-grid x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">混合模式</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-select
+          :options="blendingOptions"
+          :value="(material as any)?.blending"
+          placeholder="混合模式"
+          @update:value="(v: string) => updateMaterialText('blending', v)"
+        />
+      </n-gi>
+    </n-grid>
+    <n-grid x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">深度函数</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-select
+          :options="depthFuncOptions"
+          :value="(material as any)?.depthFunc"
+          placeholder="深度函数"
+          @update:value="(v: string) => updateMaterialText('depthFunc', v)"
+        />
+      </n-gi>
+    </n-grid>
+    <n-grid x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">预乘透明</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-switch :value="(material as any)?.premultipliedAlpha" @update:value="(v:boolean) => updateMaterialBoolean('premultipliedAlpha', v)" />
+      </n-gi>
+    </n-grid>
+    <n-grid x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">抖动</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-switch :value="(material as any)?.dithering" @update:value="(v:boolean) => updateMaterialBoolean('dithering', v)" />
+      </n-gi>
+    </n-grid>
+    <n-grid x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">多边形偏移</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-switch :value="(material as any)?.polygonOffset" @update:value="(v:boolean) => updateMaterialBoolean('polygonOffset', v)" />
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="(material as any)?.polygonOffset" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">偏移因子</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-input-number :value="(material as any)?.polygonOffsetFactor" placeholder="偏移因子" @update:value="(v:number) => updateMaterialNumber('polygonOffsetFactor', v)" />
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="(material as any)?.polygonOffset" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">偏移单位</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-input-number :value="(material as any)?.polygonOffsetUnits" placeholder="偏移单位" @update:value="(v:number) => updateMaterialNumber('polygonOffsetUnits', v)" />
+      </n-gi>
+    </n-grid>
+    <n-grid x-gap="6" :cols="10">
       <n-gi class="gid-item" :span="3">线框</n-gi>
       <n-gi class="gid-item" :span="7">
         <n-switch :value="material?.wireframe" @update:value="(v:boolean) => updateMaterialBoolean('wireframe', v)" />
@@ -397,6 +490,36 @@
         </div>
       </n-gi>
     </n-grid>
+    <n-grid v-if="showLightMap" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">光照贴图</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <div class="texture-row">
+          <n-upload
+            :default-upload="false"
+            :show-file-list="false"
+            accept="image/*"
+            :file-list="uploadFileLists.lightMap"
+            @update:file-list="(files: UploadFileInfo[]) => handleTextureFileListChange('lightMap', files)"
+          >
+            <n-button size="small" class="texture-button">{{ getTextureLabel('lightMap') || '选择贴图' }}</n-button>
+          </n-upload>
+          <n-image
+            v-if="isPreviewableTexture(mapMaterial?.lightMap)"
+            :src="mapMaterial?.lightMap"
+            :preview-disabled="true"
+            class="texture-preview-container"
+            :img-props="{ class: 'texture-preview-thumb' }"
+            alt="光照贴图预览"
+          />
+        </div>
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="showLightMap" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">光照强度</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-input-number :value="mapMaterial?.lightMapIntensity" placeholder="光照强度" @update:value="(v:number) => updateMaterialNumber('lightMapIntensity', v)" />
+      </n-gi>
+    </n-grid>
     <n-grid v-if="showMapFields" x-gap="6" :cols="10">
       <n-gi class="gid-item" :span="3">Alpha贴图</n-gi>
       <n-gi class="gid-item" :span="7">
@@ -421,7 +544,37 @@
         </div>
       </n-gi>
     </n-grid>
-    <n-grid v-if="showMapFields" x-gap="6" :cols="10">
+    <n-grid v-if="showBumpMap" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">凹凸贴图</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <div class="texture-row">
+          <n-upload
+            :default-upload="false"
+            :show-file-list="false"
+            accept="image/*"
+            :file-list="uploadFileLists.bumpMap"
+            @update:file-list="(files: UploadFileInfo[]) => handleTextureFileListChange('bumpMap', files)"
+          >
+            <n-button size="small" class="texture-button">{{ getTextureLabel('bumpMap') || '选择贴图' }}</n-button>
+          </n-upload>
+          <n-image
+            v-if="isPreviewableTexture(mapMaterial?.bumpMap)"
+            :src="mapMaterial?.bumpMap"
+            :preview-disabled="true"
+            class="texture-preview-container"
+            :img-props="{ class: 'texture-preview-thumb' }"
+            alt="凹凸贴图预览"
+          />
+        </div>
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="showBumpMap" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">凹凸强度</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-input-number :value="mapMaterial?.bumpScale" placeholder="凹凸强度" @update:value="(v:number) => updateMaterialNumber('bumpScale', v)" />
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="showEnvMap" x-gap="6" :cols="10">
       <n-gi class="gid-item" :span="3">环境贴图</n-gi>
       <n-gi class="gid-item" :span="7">
         <div class="texture-row">
@@ -459,7 +612,7 @@
         <div v-if="mapMaterial?.envMapType === 'hdr'" class="texture-meta">HDR环境贴图（无预览）</div>
       </n-gi>
     </n-grid>
-    <n-grid v-if="showMapFields" x-gap="6" :cols="10">
+    <n-grid v-if="showEnvMap" x-gap="6" :cols="10">
       <n-gi class="gid-item" :span="3">环境强度</n-gi>
       <n-gi class="gid-item" :span="7">
         <n-input-number :value="mapMaterial?.envMapIntensity" placeholder="环境强度" @update:value="(v:number) => updateMaterialNumber('envMapIntensity', v)" />
@@ -858,6 +1011,286 @@
       </n-gi>
     </n-grid>
 
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">清漆贴图</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <div class="texture-row">
+          <n-upload
+            :default-upload="false"
+            :show-file-list="false"
+            accept="image/*"
+            :file-list="uploadFileLists.clearcoatMap"
+            @update:file-list="(files: UploadFileInfo[]) => handleTextureFileListChange('clearcoatMap', files)"
+          >
+            <n-button size="small" class="texture-button">{{ getTextureLabel('clearcoatMap') || '选择贴图' }}</n-button>
+          </n-upload>
+          <n-image
+            v-if="isPreviewableTexture(physicalMaterial?.clearcoatMap)"
+            :src="physicalMaterial?.clearcoatMap"
+            :preview-disabled="true"
+            class="texture-preview-container"
+            :img-props="{ class: 'texture-preview-thumb' }"
+            alt="清漆贴图预览"
+          />
+        </div>
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">清漆粗糙贴图</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <div class="texture-row">
+          <n-upload
+            :default-upload="false"
+            :show-file-list="false"
+            accept="image/*"
+            :file-list="uploadFileLists.clearcoatRoughnessMap"
+            @update:file-list="(files: UploadFileInfo[]) => handleTextureFileListChange('clearcoatRoughnessMap', files)"
+          >
+            <n-button size="small" class="texture-button">{{ getTextureLabel('clearcoatRoughnessMap') || '选择贴图' }}</n-button>
+          </n-upload>
+          <n-image
+            v-if="isPreviewableTexture(physicalMaterial?.clearcoatRoughnessMap)"
+            :src="physicalMaterial?.clearcoatRoughnessMap"
+            :preview-disabled="true"
+            class="texture-preview-container"
+            :img-props="{ class: 'texture-preview-thumb' }"
+            alt="清漆粗糙贴图预览"
+          />
+        </div>
+      </n-gi>
+    </n-grid>
+
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">绒毛强度</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-input-number :value="physicalMaterial?.sheen" placeholder="绒毛强度" @update:value="(v:number) => updateMaterialNumber('sheen', v)" />
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">绒毛颜色</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-color-picker
+          :value="physicalMaterial?.sheenColor ?? '#ffffff'"
+          :show-alpha="false"
+          @update:value="(v: string) => updateMaterialText('sheenColor', v)"
+        />
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">绒毛粗糙</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-input-number :value="physicalMaterial?.sheenRoughness" placeholder="绒毛粗糙" @update:value="(v:number) => updateMaterialNumber('sheenRoughness', v)" />
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">绒毛颜色贴图</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <div class="texture-row">
+          <n-upload
+            :default-upload="false"
+            :show-file-list="false"
+            accept="image/*"
+            :file-list="uploadFileLists.sheenColorMap"
+            @update:file-list="(files: UploadFileInfo[]) => handleTextureFileListChange('sheenColorMap', files)"
+          >
+            <n-button size="small" class="texture-button">{{ getTextureLabel('sheenColorMap') || '选择贴图' }}</n-button>
+          </n-upload>
+          <n-image
+            v-if="isPreviewableTexture(physicalMaterial?.sheenColorMap)"
+            :src="physicalMaterial?.sheenColorMap"
+            :preview-disabled="true"
+            class="texture-preview-container"
+            :img-props="{ class: 'texture-preview-thumb' }"
+            alt="绒毛颜色贴图预览"
+          />
+        </div>
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">绒毛粗糙贴图</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <div class="texture-row">
+          <n-upload
+            :default-upload="false"
+            :show-file-list="false"
+            accept="image/*"
+            :file-list="uploadFileLists.sheenRoughnessMap"
+            @update:file-list="(files: UploadFileInfo[]) => handleTextureFileListChange('sheenRoughnessMap', files)"
+          >
+            <n-button size="small" class="texture-button">{{ getTextureLabel('sheenRoughnessMap') || '选择贴图' }}</n-button>
+          </n-upload>
+          <n-image
+            v-if="isPreviewableTexture(physicalMaterial?.sheenRoughnessMap)"
+            :src="physicalMaterial?.sheenRoughnessMap"
+            :preview-disabled="true"
+            class="texture-preview-container"
+            :img-props="{ class: 'texture-preview-thumb' }"
+            alt="绒毛粗糙贴图预览"
+          />
+        </div>
+      </n-gi>
+    </n-grid>
+
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">彩虹强度</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-input-number :value="physicalMaterial?.iridescence" placeholder="彩虹强度" @update:value="(v:number) => updateMaterialNumber('iridescence', v)" />
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">彩虹折射率</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-input-number :value="physicalMaterial?.iridescenceIOR" placeholder="彩虹折射率" @update:value="(v:number) => updateMaterialNumber('iridescenceIOR', v)" />
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="showPhysical" x-gap="6" :cols="11">
+      <n-gi class="gid-item" :span="2">彩虹厚度</n-gi>
+      <n-gi class="gid-item" :span="3">
+        <n-input-number
+          placeholder="min"
+          :value="physicalMaterial?.iridescenceThicknessRange?.[0]"
+          @update:value="(v:number) => updateMaterialVec2('iridescenceThicknessRange', 0, v, [100, 400])"
+        />
+      </n-gi>
+      <n-gi class="gid-item" :span="3">
+        <n-input-number
+          placeholder="max"
+          :value="physicalMaterial?.iridescenceThicknessRange?.[1]"
+          @update:value="(v:number) => updateMaterialVec2('iridescenceThicknessRange', 1, v, [100, 400])"
+        />
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">彩虹贴图</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <div class="texture-row">
+          <n-upload
+            :default-upload="false"
+            :show-file-list="false"
+            accept="image/*"
+            :file-list="uploadFileLists.iridescenceMap"
+            @update:file-list="(files: UploadFileInfo[]) => handleTextureFileListChange('iridescenceMap', files)"
+          >
+            <n-button size="small" class="texture-button">{{ getTextureLabel('iridescenceMap') || '选择贴图' }}</n-button>
+          </n-upload>
+          <n-image
+            v-if="isPreviewableTexture(physicalMaterial?.iridescenceMap)"
+            :src="physicalMaterial?.iridescenceMap"
+            :preview-disabled="true"
+            class="texture-preview-container"
+            :img-props="{ class: 'texture-preview-thumb' }"
+            alt="彩虹贴图预览"
+          />
+        </div>
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">彩虹厚度贴图</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <div class="texture-row">
+          <n-upload
+            :default-upload="false"
+            :show-file-list="false"
+            accept="image/*"
+            :file-list="uploadFileLists.iridescenceThicknessMap"
+            @update:file-list="(files: UploadFileInfo[]) => handleTextureFileListChange('iridescenceThicknessMap', files)"
+          >
+            <n-button size="small" class="texture-button">{{ getTextureLabel('iridescenceThicknessMap') || '选择贴图' }}</n-button>
+          </n-upload>
+          <n-image
+            v-if="isPreviewableTexture(physicalMaterial?.iridescenceThicknessMap)"
+            :src="physicalMaterial?.iridescenceThicknessMap"
+            :preview-disabled="true"
+            class="texture-preview-container"
+            :img-props="{ class: 'texture-preview-thumb' }"
+            alt="彩虹厚度贴图预览"
+          />
+        </div>
+      </n-gi>
+    </n-grid>
+
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">高光强度</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-input-number :value="physicalMaterial?.specularIntensity" placeholder="高光强度" @update:value="(v:number) => updateMaterialNumber('specularIntensity', v)" />
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">高光颜色</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-color-picker
+          :value="physicalMaterial?.specularColor ?? '#ffffff'"
+          :show-alpha="false"
+          @update:value="(v: string) => updateMaterialText('specularColor', v)"
+        />
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">高光强度贴图</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <div class="texture-row">
+          <n-upload
+            :default-upload="false"
+            :show-file-list="false"
+            accept="image/*"
+            :file-list="uploadFileLists.specularIntensityMap"
+            @update:file-list="(files: UploadFileInfo[]) => handleTextureFileListChange('specularIntensityMap', files)"
+          >
+            <n-button size="small" class="texture-button">{{ getTextureLabel('specularIntensityMap') || '选择贴图' }}</n-button>
+          </n-upload>
+          <n-image
+            v-if="isPreviewableTexture(physicalMaterial?.specularIntensityMap)"
+            :src="physicalMaterial?.specularIntensityMap"
+            :preview-disabled="true"
+            class="texture-preview-container"
+            :img-props="{ class: 'texture-preview-thumb' }"
+            alt="高光强度贴图预览"
+          />
+        </div>
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">高光颜色贴图</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <div class="texture-row">
+          <n-upload
+            :default-upload="false"
+            :show-file-list="false"
+            accept="image/*"
+            :file-list="uploadFileLists.specularColorMap"
+            @update:file-list="(files: UploadFileInfo[]) => handleTextureFileListChange('specularColorMap', files)"
+          >
+            <n-button size="small" class="texture-button">{{ getTextureLabel('specularColorMap') || '选择贴图' }}</n-button>
+          </n-upload>
+          <n-image
+            v-if="isPreviewableTexture(physicalMaterial?.specularColorMap)"
+            :src="physicalMaterial?.specularColorMap"
+            :preview-disabled="true"
+            class="texture-preview-container"
+            :img-props="{ class: 'texture-preview-thumb' }"
+            alt="高光颜色贴图预览"
+          />
+        </div>
+      </n-gi>
+    </n-grid>
+
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">衰减颜色</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-color-picker
+          :value="physicalMaterial?.attenuationColor ?? '#ffffff'"
+          :show-alpha="false"
+          @update:value="(v: string) => updateMaterialText('attenuationColor', v)"
+        />
+      </n-gi>
+    </n-grid>
+    <n-grid v-if="showPhysical" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">衰减距离</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-input-number :value="physicalMaterial?.attenuationDistance" placeholder="衰减距离" @update:value="(v:number) => updateMaterialNumber('attenuationDistance', v)" />
+      </n-gi>
+    </n-grid>
+
     <n-grid v-if="showToon" x-gap="6" :cols="10">
       <n-gi class="gid-item" :span="3">渐变贴图</n-gi>
       <n-gi class="gid-item" :span="7">
@@ -966,6 +1399,13 @@
       <n-gi class="gid-item" :span="3">距离衰减</n-gi>
       <n-gi class="gid-item" :span="7">
         <n-switch :value="pointsMaterial?.sizeAttenuation" @update:value="(v:boolean) => updateMaterialBoolean('sizeAttenuation', v)" />
+      </n-gi>
+    </n-grid>
+
+    <n-grid v-if="showSprite" x-gap="6" :cols="10">
+      <n-gi class="gid-item" :span="3">大小衰减</n-gi>
+      <n-gi class="gid-item" :span="7">
+        <n-switch :value="(spriteMaterial as any)?.sizeAttenuation" @update:value="(v:boolean) => updateMaterialBoolean('sizeAttenuation', v)" />
       </n-gi>
     </n-grid>
   </n-flex>

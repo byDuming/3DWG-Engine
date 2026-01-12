@@ -1,7 +1,7 @@
 <script setup lang="ts">
-  import { type TreeDropInfo, type TreeOption, NIcon, type DropdownOption } from 'naive-ui'
+  import { type TreeDropInfo, type TreeOption, NIcon, type DropdownOption, type UploadFileInfo } from 'naive-ui'
   import { ref, computed, watch, watchEffect, h, type Component } from 'vue'
-  import { Cube, OptionsSharp, CubeOutline, ColorPalette, Camera, Move, Resize, Earth, ArrowUndo, ArrowRedo } from '@vicons/ionicons5'
+  import { Cube, OptionsSharp, CubeOutline, ColorPalette, Camera, Move, Resize, Earth, ArrowUndo, ArrowRedo, SettingsOutline } from '@vicons/ionicons5'
   import { TextureOutlined, DeleteFilled, DriveFileRenameOutlineRound, LightbulbOutlined, Md3DRotationFilled, PlaceFilled } from '@vicons/material'
 
   import AttributesPanel from './panles/Attributes.vue'
@@ -11,6 +11,7 @@
   import SceneAttrPanel from './panles/SceneAttr.vue'
   import CameraAttrPanel from './panles/CameraAttr.vue'
   import LightAttrPanel from './panles/LightAttr.vue'
+  import ProjectAttrPanel from './panles/ProjectAttr.vue'
   import { useSceneStore } from '@/stores/modules/useScene.store'
   import { useUiEditorStore } from '@/stores/modules/uiEditor.store.vue'
   import { geometryTypeOptions } from '@/types/geometry'
@@ -42,12 +43,22 @@
 
   const expandedKeysRef = ref<string[]>(['Scene'])
   const checkedKeysRef = ref<string[]>([])
+  const modelUploadList = ref<UploadFileInfo[]>([])
   function handleExpandedKeysChange(expandedKeys: string[]) {
     expandedKeysRef.value = expandedKeys
   }
 
   function handleCheckedKeysChange(checkedKeys: string[]) {
     checkedKeysRef.value = checkedKeys
+  }
+
+  function handleModelFiles(fileList: UploadFileInfo[]) {
+    modelUploadList.value = fileList
+    const file = fileList[0]?.file
+    if (!file) return
+    const parentId = sceneStore.selectedObjectId ?? 'Scene'
+    sceneStore.importModelFile(file, parentId)
+    modelUploadList.value = []
   }
 
   function handleDrop({ node, dragNode, dropPosition }: TreeDropInfo) {
@@ -184,7 +195,8 @@
       { name: 'light-tab', icon: LightbulbOutlined, label: '光源属性', component: LightAttrPanel, isShow: isLight },
       { name: 'helper-tab', icon: CubeOutline, label: '辅助对象', component: HelperAttributesPanel, isShow: isHelper || hasLinkedHelper },
       { name: 'geometry-tab', icon: Cube, label: '几何组件', component: GeometryAttrPanel, isShow: isMesh },
-      { name: 'material-tab', icon: TextureOutlined, label: '材质组件', component: MaterialAttrPanel, isShow: isMesh }
+      { name: 'material-tab', icon: TextureOutlined, label: '材质组件', component: MaterialAttrPanel, isShow: isMesh },
+      { name: 'project-tab', icon: SettingsOutline, label: '工程属性', component: ProjectAttrPanel, isShow: true },
     ].filter(tab => tab.isShow)
   })
 
@@ -418,6 +430,25 @@
         </n-icon>
       </n-float-button>
     </n-dropdown>
+    <!-- import model -->
+    <n-upload
+      :default-upload="false"
+      :show-file-list="false"
+      accept=".glb,.gltf"
+      :file-list="modelUploadList"
+      @update:file-list="(files: UploadFileInfo[]) => handleModelFiles(files)"
+    >
+      <n-tooltip trigger="hover" placement="right">
+        <template #trigger>
+          <n-float-button shape="square" style="z-index: 10; margin-left: -80px; position: relative;">
+            <n-icon>
+              <Md3DRotationFilled />
+            </n-icon>
+          </n-float-button>
+        </template>
+        导入模型
+      </n-tooltip>
+    </n-upload>
   </n-flex>
 
   <n-dropdown
@@ -467,7 +498,8 @@
           </n-popover>
         </template>
         <!-- 属性面板内容 -->
-        <component v-if="sceneStore.cureentObjectData" :is="tab.component" />
+        <component v-if="tab.name === 'project-tab'" :is="tab.component" />
+        <component v-else-if="sceneStore.cureentObjectData" :is="tab.component" />
         <n-empty v-else description="未选择对象" />
       </n-tab-pane>
     </template>

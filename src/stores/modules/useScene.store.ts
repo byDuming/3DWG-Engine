@@ -2,8 +2,9 @@
   import { getDB, initDB } from '@/services/db'
 
   import { defineStore } from 'pinia'
-  import { Object3D, Scene } from 'three/webgpu'
+  import { Object3D, Scene } from 'three'
   import type { WebGPURenderer } from 'three/webgpu'
+  import type { WebGLRenderer } from 'three'
 import { computed, ref, shallowRef, h, type VNodeChild, toRaw, watch } from 'vue'
   import { createSceneObjectData, type SceneObjectInput } from '@/utils/sceneFactory.ts'
 import { applyCameraSettings, applyLightSettings, applySceneSettings, applyTransform, createThreeObject, syncThreeObjectState, updateMeshGeometry, updateMeshMaterial } from '@/utils/threeObjectFactory.ts'
@@ -14,6 +15,8 @@ import { applyCameraSettings, applyLightSettings, applySceneSettings, applyTrans
   import { useRenderer } from '@/composables/useRenderer'
   import type { NotificationApiInjection } from 'naive-ui/es/notification/src/NotificationProvider'
   import type { DialogApiInjection } from 'naive-ui/es/dialog/src/DialogProvider'
+  import type { AssetRef } from '@/types/asset'
+  import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 
 //  `defineStore()` 的返回值的命名是自由的
 // 但最好能显得store 的名字，且以 `use` 开头，尾`Store` 结尾。
@@ -37,8 +40,20 @@ export const useSceneStore = defineStore('scene', () => {
   const selectedObjectId = ref<string | null>(null);
   const selectionVersion = ref(0);
   // three Scene 引用（用于同步 three 层）
-  const webGPURenderer = shallowRef<WebGPURenderer | null>(null);
+  const webGPURenderer = shallowRef<WebGPURenderer | WebGLRenderer | null>(null);
   const threeScene = shallowRef<Scene | null>(null);
+  const rendererSettings = ref({
+    rendererType: 'webgpu',
+    antialias: true,
+    shadows: true,
+    shadowType: 'pcf',
+    toneMapping: 'acesFilmic',
+    toneMappingExposure: 1,
+    outputColorSpace: 'srgb',
+    useLegacyLights: false
+  })
+  const assets = ref<AssetRef[]>([])
+  const assetFiles = shallowRef(new Map<string, File>())
 
   // 当前选中对象数据（基于 tree，支持子级）
   const selectedObjectData = computed(() => {
@@ -67,6 +82,73 @@ export const useSceneStore = defineStore('scene', () => {
   
   const transformMode = ref<'translate' | 'rotate' | 'scale'>('translate');
   const transformSpace = ref<'world' | 'local'>('world');
+
+  function getAssetById(id: string) {
+    return assets.value.find(asset => asset.id === id) ?? null
+  }
+
+  function registerLocalAsset(file: File, type: AssetRef['type']): AssetRef {
+    const id = `asset-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    const asset: AssetRef = {
+      id,
+      type,
+      uri: `local://${id}`,
+      name: file.name,
+      source: 'local',
+      meta: {
+        ext,
+        size: file.size,
+        mime: file.type
+      },
+      createdAt: Date.now()
+    }
+    assets.value.push(asset)
+    assetFiles.value.set(id, file)
+    return asset
+  }
+
+  async function resolveAssetUri(asset: AssetRef) {
+    if (asset.uri.startsWith('local://')) {
+      const file = assetFiles.value.get(asset.id)
+      if (!file) return null
+      const url = URL.createObjectURL(file)
+      return { url, revoke: () => URL.revokeObjectURL(url) }
+    }
+    return { url: asset.uri }
+  }
+
+  async function loadModelAssetIntoObject(assetId: string, objectId: string) {
+    const asset = getAssetById(assetId)
+    if (!asset) return
+    const target = objectsMap.value.get(objectId)
+    if (!target) return
+    const resolved = await resolveAssetUri(asset)
+    if (!resolved) {
+      console.warn('Model asset is missing local file:', asset.name)
+      return
+    }
+    const loader = new GLTFLoader()
+    try {
+      const gltf = await loader.loadAsync(resolved.url)
+      target.children.slice().forEach(child => target.remove(child))
+      if (gltf.scene) target.add(gltf.scene)
+    } finally {
+      resolved.revoke?.()
+    }
+  }
+
+  async function importModelFile(file: File, parentId: string) {
+    const asset = registerLocalAsset(file, 'model')
+    const created = addSceneObjectData({
+      type: 'model',
+      name: asset.name,
+      parentId,
+      assetId: asset.id
+    })
+    await loadModelAssetIntoObject(asset.id, created.id)
+    selectedObjectId.value = created.id
+  }
 
   type SceneSnapshot = {
     objectDataList: SceneObjectData[]
@@ -215,6 +297,11 @@ export const useSceneStore = defineStore('scene', () => {
     name.value = sceneData.name // store 名称
     version.value = sceneData.version // store 版本
     aIds.value = sceneData.aIds // 场景内对象自增ID
+    rendererSettings.value = {
+      ...rendererSettings.value,
+      ...(sceneData.rendererSettings ?? {})
+    }
+    assets.value = (sceneData.assets ?? []) as AssetRef[]
     isRestoring.value = true
     objectDataList.value = sceneData.objectDataList ?? [] // 引擎逻辑层级
 
@@ -330,9 +417,8 @@ export const useSceneStore = defineStore('scene', () => {
       if (!obj) {
         obj = createThreeObject(data, { objectsMap: objectsMap.value })
         objectsMap.value.set(data.id, obj)
-      } else {
-        applyTransform(obj, data)
       }
+      syncThreeObjectState(obj, data)
       if (data.type === 'camera' && obj instanceof Object3D) {
         if ((obj as any).isPerspectiveCamera) {
           applyCameraSettings(obj as any, data)
@@ -340,6 +426,9 @@ export const useSceneStore = defineStore('scene', () => {
       }
       if (data.type === 'light') {
         applyLightSettings(obj as any, data)
+      }
+      if (data.type === 'model' && data.assetId) {
+        void loadModelAssetIntoObject(data.assetId, data.id)
       }
     })
 
@@ -418,6 +507,7 @@ export const useSceneStore = defineStore('scene', () => {
       target.type === 'light'
       && patch.userData !== undefined
       && (patch.userData as any)?.lightType !== (target.userData as any)?.lightType
+    const assetChanged = patch.assetId !== undefined && patch.assetId !== target.assetId
     let meshRebuilt = false
     if (typeChanged || helperChanged || lightTypeChanged) { // 类型或helper配置变更需要重建three对象
       const old = objectsMap.value.get(id) // 取出现有three对象
@@ -468,6 +558,9 @@ export const useSceneStore = defineStore('scene', () => {
     if (nextData.type === 'light') {
       const obj = objectsMap.value.get(id)
       if (obj) applyLightSettings(obj as any, nextData)
+    }
+    if (nextData.type === 'model' && (assetChanged || typeChanged) && nextData.assetId) {
+      void loadModelAssetIntoObject(nextData.assetId, id)
     }
 
     return target // 返回更新后的数据
@@ -610,6 +703,8 @@ export const useSceneStore = defineStore('scene', () => {
         row.version = version.value
         row.aIds = aIds.value
         row.objectDataList = JSON.stringify(objectDataList.value)
+        row.assets = JSON.stringify(assets.value)
+        row.rendererSettings = JSON.stringify(rendererSettings.value)
         row.updatedAt = new Date()
         return row
       }
@@ -645,6 +740,7 @@ export const useSceneStore = defineStore('scene', () => {
     addSceneObjectData,
     updateSceneObjectData,
     removeSceneObjectData,
+    importModelFile,
     undo,
     redo,
     // 获取树形结构
@@ -653,6 +749,8 @@ export const useSceneStore = defineStore('scene', () => {
 
     threeScene,
     webGPURenderer,
+    rendererSettings,
+    assets,
 
     clearScene,
     saveScene,
