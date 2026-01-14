@@ -5,7 +5,7 @@
   import type { SceneSettings } from '@/interfaces/sceneInterface'
 
   const sceneStore = useSceneStore()
-  const sceneSettings = computed(() => sceneStore.cureentObjectData?.scene as SceneSettings | undefined)
+  const sceneSettings = computed(() => sceneStore.currentObjectData?.scene as SceneSettings | undefined)
 
   const uploadFileLists = reactive<Record<string, UploadFileInfo[]>>({})
   const fileNames = reactive<Record<string, string>>({})
@@ -31,12 +31,12 @@
   function updateSceneSettings(patch: Partial<SceneSettings>) {
     const id = sceneStore.selectedObjectId
     if (!id) return
-    const current = sceneStore.cureentObjectData?.scene ?? {}
+    const current = sceneStore.currentObjectData?.scene ?? {}
     sceneStore.updateSceneObjectData(id, { scene: { ...current, ...patch } } as any)
   }
 
   function updateFog(patch: Record<string, unknown>) {
-    const current = sceneStore.cureentObjectData?.scene ?? {}
+    const current = sceneStore.currentObjectData?.scene ?? {}
     const nextFog = { ...(current.fog ?? {}), ...patch }
     updateSceneSettings({ fog: nextFog })
   }

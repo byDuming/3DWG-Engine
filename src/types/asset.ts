@@ -1,4 +1,4 @@
-export type AssetType = 'model'
+export type AssetType = 'model' | 'texture'
 export type AssetSource = 'local' | 'remote'
 
 export type AssetRef = {
@@ -7,6 +7,7 @@ export type AssetRef = {
   uri: string
   name: string
   source: AssetSource
+  thumbnail?: string // 预览图 URL
   meta?: {
     ext?: string
     size?: number

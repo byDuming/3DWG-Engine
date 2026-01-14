@@ -19,7 +19,7 @@
   const sceneStore = useSceneStore()
 
   // 当前选中对象的几何体数据
-  const geometry = computed(() => sceneStore.cureentObjectData?.mesh?.geometry as GeometryData | undefined)
+  const geometry = computed(() => sceneStore.currentObjectData?.mesh?.geometry as GeometryData | undefined)
   const geometryType = computed(() => geometry.value?.type)
 
   // 按类型拆分几何体数据
@@ -43,7 +43,7 @@
   function updateGeometry(patch: Record<string, unknown>) {
     const id = sceneStore.selectedObjectId
     if (!id) return
-    const currentMesh = sceneStore.cureentObjectData?.mesh
+    const currentMesh = sceneStore.currentObjectData?.mesh
     if (!currentMesh?.geometry) return
     const nextGeometry = { ...currentMesh.geometry, ...patch }
     const nextMesh = { ...currentMesh, geometry: nextGeometry }

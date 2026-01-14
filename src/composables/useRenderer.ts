@@ -1,5 +1,5 @@
 import { ref, shallowRef, onBeforeUnmount, watch } from 'vue'
-import { Scene, PerspectiveCamera, Color } from 'three'
+import { Scene, PerspectiveCamera, Color, type ToneMapping } from 'three'
 import { WebGPURenderer } from 'three/webgpu'
 import {
   WebGLRenderer,
@@ -20,6 +20,17 @@ import { useSceneStore } from '@/stores/modules/useScene.store.ts'
 import { MapControls } from 'three/addons/controls/MapControls.js'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
 
+/**
+ * 渲染器与交互控制逻辑（纯三维层，不关心 UI）：
+ * - 创建并管理 WebGPU/WebGL Renderer（根据 store.rendererSettings 决定类型）
+ * - 维护相机、MapControls、TransformControls
+ * - 负责射线选择（点击选中场景对象）、快捷键（W/E/R/V/F、Ctrl+Z/Y、Ctrl+S）
+ *
+ * 设计原则：
+ * - three 场景和对象的数据来源完全依赖 useSceneStore（单一数据源）
+ * - 渲染器的生命周期（创建 / 销毁）由本 composable 管理，store 只保存引用
+ * - 清理逻辑尽量对称（rebuildRenderer / dispose）防止内存泄漏
+ */
 export function useRenderer(opts: { antialias?: boolean } = {}) {
   const sceneStore = useSceneStore()
   const container = ref<HTMLElement | null>(null)
@@ -29,6 +40,8 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
   const raycaster = new Raycaster()
   const pointer = new Vector2()
   let pointerDownPos: { x: number; y: number } | null = null
+  let isDraggingTransform = false // 标记是否正在拖动 TransformControls
+  let pendingTransformUpdate: { id: string; transform: { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] } } | null = null // 待提交的 transform 更新
 
   function findCameraFromStore() {
     const map = sceneStore.objectsMap as unknown as Map<string, PerspectiveCamera>
@@ -69,28 +82,30 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
   }
 
   function resize() {
-    if (!container.value || !sceneStore.webGPURenderer || !camera.value) return
+    if (!container.value || !sceneStore.renderer || !camera.value) return
     const w = container.value.clientWidth || window.innerWidth
     const h = container.value.clientHeight || window.innerHeight
-    sceneStore.webGPURenderer.setSize(w, h)
+    sceneStore.renderer.setSize(w, h)
     camera.value.aspect = w / h
     camera.value.updateProjectionMatrix()
   }
 
   function start() {
     if (!camera.value) ensureCamera()
-    if (!sceneStore.webGPURenderer || !sceneStore.threeScene || !camera.value) return
-    sceneStore.webGPURenderer.setAnimationLoop(() => {
+    if (!sceneStore.renderer || !sceneStore.threeScene || !camera.value) return
+    sceneStore.renderer.setAnimationLoop(() => {
       controls.value?.update()
       if (transformControls.value?.object && !isInSceneGraph(transformControls.value.object)) {
         transformControls.value.detach()
       }
-      sceneStore.webGPURenderer!.render(sceneStore.threeScene!, camera.value!)
+      // WebGPU 和 WebGL 都使用统一的渲染调用
+      // TransformControls 在拖动时会自动触发渲染，这里确保场景正常渲染
+      sceneStore.renderer!.render(sceneStore.threeScene!, camera.value!)
     })
   }
 
   function stop() {
-    sceneStore.webGPURenderer?.setAnimationLoop(null)
+    sceneStore.renderer?.setAnimationLoop(null as any)
   }
 
   function dispose() {
@@ -98,11 +113,7 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
     const pendingTransform = detachTransformControls()
     const pendingControls = controls.value
     controls.value = null
-    try {
-      sceneStore.webGPURenderer?.dispose()
-    } catch (e) {
-      // ignore
-    }
+    // 渲染器的真正销毁交给 rebuildRenderer / 组件卸载统一处理
     try {
       pendingTransform?.dispose()
     } catch (e) {
@@ -116,7 +127,7 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
     // const dom = sceneStore.webGPURenderer?.domElement
     container.value?.removeEventListener('pointerdown', handlePointerDown)
     container.value?.removeEventListener('pointerup', handlePointerUp)
-    sceneStore.webGPURenderer = null
+    sceneStore.renderer = null
     sceneStore.threeScene = null
     camera.value = null
     transformControls.value = null
@@ -168,7 +179,7 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
 
   function handlePointerUp(event: PointerEvent) {
     console.log('handlePointerUp');
-    const dom = sceneStore.webGPURenderer?.domElement
+    const dom = sceneStore.renderer?.domElement
     if (!camera.value || !dom || transformControls.value?.dragging) return
     const moved = pointerDownPos
       ? Math.hypot(event.clientX - pointerDownPos.x, event.clientY - pointerDownPos.y)
@@ -324,7 +335,7 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
   })
 
   function applyRendererSettings() {
-    const renderer = sceneStore.webGPURenderer
+    const renderer = sceneStore.renderer
     if (!renderer) return
     const settings = sceneStore.rendererSettings
     const toneMappingMap: Record<string, number> = {
@@ -339,7 +350,7 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
       linear: LinearSRGBColorSpace
     }
     if (settings.toneMapping in toneMappingMap) {
-      renderer.toneMapping = toneMappingMap[settings.toneMapping]
+      renderer.toneMapping = toneMappingMap[settings.toneMapping] as ToneMapping
     }
     if (typeof settings.toneMappingExposure === 'number') {
       renderer.toneMappingExposure = settings.toneMappingExposure
@@ -371,15 +382,15 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
     const pendingTransform = detachTransformControls()
     const pendingControls = controls.value
     controls.value = null
-    if (sceneStore.webGPURenderer) {
+    if (sceneStore.renderer) {
       try {
-        sceneStore.webGPURenderer.dispose()
+        sceneStore.renderer.dispose()
       } catch (e) {
         // ignore
       }
-      const dom = sceneStore.webGPURenderer.domElement
+      const dom = sceneStore.renderer.domElement
       dom?.parentElement?.removeChild(dom)
-      sceneStore.webGPURenderer = null
+      sceneStore.renderer = null
     }
     try {
       pendingTransform?.dispose()
@@ -395,30 +406,47 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
     if (!container.value) return
     const antialias = opts.antialias ?? sceneStore.rendererSettings.antialias
     if (sceneStore.rendererSettings.rendererType === 'webgl') {
-      sceneStore.webGPURenderer = new WebGLRenderer({ antialias })
+      sceneStore.renderer = new WebGLRenderer({ antialias })
     } else {
-      sceneStore.webGPURenderer = new WebGPURenderer({ antialias })
+      sceneStore.renderer = new WebGPURenderer({ antialias })
     }
-    container.value.appendChild(sceneStore.webGPURenderer.domElement)
+    container.value.appendChild(sceneStore.renderer.domElement)
 
     if (camera.value) {
       controls.value = new MapControls(camera.value, container.value)
 
-      transformControls.value = new TransformControls(camera.value, sceneStore.webGPURenderer.domElement)
+      transformControls.value = new TransformControls(camera.value, sceneStore.renderer.domElement)
       transformControls.value.addEventListener('dragging-changed', (event) => {
-        if (controls.value) controls.value.enabled = !event.value
+        const isDragging = event.value === true
+        isDraggingTransform = isDragging
+        if (controls.value) controls.value.enabled = !isDragging
+        
+        // 拖动结束时，提交最终的 transform 更新到 store
+        if (!isDragging && pendingTransformUpdate) {
+          sceneStore.updateSceneObjectData(pendingTransformUpdate.id, {
+            transform: pendingTransformUpdate.transform
+          })
+          pendingTransformUpdate = null
+        }
       })
+      // 拖动过程中只缓存 transform，不立即更新 store（避免频繁 store 更新导致卡顿）
+      // 拖动结束时通过 dragging-changed 事件提交最终状态
       transformControls.value.addEventListener('objectChange', () => {
+        if (!isDraggingTransform) return // 非拖动状态才立即更新（理论上不会触发，但保险起见）
+        
         const obj = transformControls.value?.object
         const id = obj?.userData?.sceneObjectId
         if (!obj || !id) return
-        sceneStore.updateSceneObjectData(id, {
+        
+        // 拖动时只缓存，不更新 store（避免 WebGPU 下频繁 store 更新导致卡顿）
+        pendingTransformUpdate = {
+          id,
           transform: {
             position: [obj.position.x, obj.position.y, obj.position.z],
             rotation: [obj.rotation.x, obj.rotation.y, obj.rotation.z],
             scale: [obj.scale.x, obj.scale.y, obj.scale.z]
           }
-        })
+        }
       })
 
       const gizmo = transformControls.value.getHelper()

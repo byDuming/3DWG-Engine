@@ -5,27 +5,36 @@
   import { Object3D, Scene } from 'three'
   import type { WebGPURenderer } from 'three/webgpu'
   import type { WebGLRenderer } from 'three'
-import { computed, ref, shallowRef, h, type VNodeChild, toRaw, watch } from 'vue'
+  import { computed, ref, shallowRef, h, type VNodeChild, toRaw, watch, nextTick } from 'vue'
   import { createSceneObjectData, type SceneObjectInput } from '@/utils/sceneFactory.ts'
-import { applyCameraSettings, applyLightSettings, applySceneSettings, applyTransform, createThreeObject, syncThreeObjectState, updateMeshGeometry, updateMeshMaterial } from '@/utils/threeObjectFactory.ts'
+  import { applyCameraSettings, applyLightSettings, applySceneSettings, createThreeObject, syncThreeObjectState, updateMeshGeometry, updateMeshMaterial } from '@/utils/threeObjectFactory.ts'
   import { NIcon, type TreeOption } from 'naive-ui'
-  import {Cube,LogoDropbox,CubeOutline,Camera} from '@vicons/ionicons5'
-  import { LightbulbFilled,MovieCreationFilled } from '@vicons/material'
+  import { Cube, LogoDropbox, CubeOutline, Camera } from '@vicons/ionicons5'
+  import { LightbulbFilled, MovieCreationFilled } from '@vicons/material'
   import { Cubes } from '@vicons/fa'
-  import { useRenderer } from '@/composables/useRenderer'
   import type { NotificationApiInjection } from 'naive-ui/es/notification/src/NotificationProvider'
   import type { DialogApiInjection } from 'naive-ui/es/dialog/src/DialogProvider'
   import type { AssetRef } from '@/types/asset'
   import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+  import { assetApi } from '@/services/assetApi'
 
-//  `defineStore()` 的返回值的命名是自由的
-// 但最好能显得store 的名字，且以 `use` 开头，尾`Store` 结尾。
-// (比如 `useUserStore`，`useCartStore`，`useProductStore`)
-// 第一个参数是你的应用中Store 的唯一 ID。
+  /**
+   * 场景编辑核心 Store：
+   * - 维护逻辑层数据结构（objectDataList）
+   * - 映射 three Object3D（objectsMap + threeScene）
+   * - 维护撤销/重做历史（undoStack / redoStack）
+   * - 负责资产引用与渲染配置（assets / rendererSettings）
+   *
+   * ⚠️ 当前仍是一个“大一统” Store，后续可以考虑拆分为：
+   * - useSceneCoreStore：只管 objectDataList / selection / transform
+   * - useSceneHistory 或 composable：只管快照、undo/redo
+   * - useSceneAssetStore：只管资产、模型加载
+   */
 export const useSceneStore = defineStore('scene', () => {
   const name = ref('sceneStore') // store 名称
   const version = ref(1) // store 版本
   const aIds = ref(1) // 场景内对象自增ID
+  const currentSceneId = ref<number | null>(null) // 当前场景ID
 
   
   const notification = ref<NotificationApiInjection>();
@@ -39,8 +48,8 @@ export const useSceneStore = defineStore('scene', () => {
   // 当前选中对象ID
   const selectedObjectId = ref<string | null>(null);
   const selectionVersion = ref(0);
-  // three Scene 引用（用于同步 three 层）
-  const webGPURenderer = shallowRef<WebGPURenderer | WebGLRenderer | null>(null);
+  // Three 渲染器引用（WebGPU 或 WebGL）
+  const renderer = shallowRef<WebGPURenderer | WebGLRenderer | null>(null);
   const threeScene = shallowRef<Scene | null>(null);
   const rendererSettings = ref({
     rendererType: 'webgpu',
@@ -74,7 +83,7 @@ export const useSceneStore = defineStore('scene', () => {
     return dfs(tree)
   })
 
-  const cureentObjectData = computed(() => {
+  const currentObjectData = computed(() => {
     const id = selectedObjectId.value
     if (!id) return null
     return objectDataList.value.find(item => item.id === id) || null
@@ -105,6 +114,36 @@ export const useSceneStore = defineStore('scene', () => {
     }
     assets.value.push(asset)
     assetFiles.value.set(id, file)
+    return asset
+  }
+
+  /**
+   * 注册云端资产（从 assetApi 上传后返回的资产）
+   */
+  function registerRemoteAsset(asset: AssetRef): AssetRef {
+    // 检查是否已存在
+    const existing = assets.value.find(a => a.id === asset.id)
+    if (existing) {
+      return existing
+    }
+    assets.value.push(asset)
+    return asset
+  }
+
+  /**
+   * 上传资产到云端存储
+   * @param file 文件对象
+   * @param type 资产类型
+   * @param sceneId 场景ID（可选，用于组织文件路径）
+   * @returns 上传后的资产引用
+   */
+  async function uploadAsset(file: File, type: AssetRef['type'], sceneId?: number): Promise<AssetRef> {
+    if (!assetApi.isStorageAvailable()) {
+      throw new Error('Supabase Storage 未配置，无法上传资产')
+    }
+
+    const result = await assetApi.uploadAsset({ file, type, sceneId })
+    const asset = registerRemoteAsset(result.asset)
     return asset
   }
 
@@ -156,13 +195,15 @@ export const useSceneStore = defineStore('scene', () => {
     aIds: number
   }
 
+  // ---------- 撤销 / 重做历史快照 ----------
   const undoStack = ref<SceneSnapshot[]>([]) // 撤回栈：保存历史快照
   const redoStack = ref<SceneSnapshot[]>([]) // 回退栈：保存已撤回的快照
   const isRestoring = ref(false) // 快照恢复中，防止递归记录
   const maxHistory = 50 // 最多保留的快照数量
-  const historyDebounceMs = ref(300) // 高频更新的去抖间隔
+  const historyDebounceMs = ref(300) // 高频更新的去抖间隔（仅用于普通操作，如 transform 拖拽）
   const historyDebounceTimer = ref<ReturnType<typeof setTimeout> | null>(null) // 去抖计时器
   const lastSnapshot = shallowRef<SceneSnapshot | null>(null) // 上一次用于入栈的快照
+  const pendingCriticalOperation = ref(false) // 标记是否有待处理的关键操作（增删、类型变更等）
   const snapshotKeyMode = ref<'blacklist' | 'whitelist'>('blacklist')
   const snapshotKeyList = ref<string[]>([
     'file',
@@ -231,22 +272,49 @@ export const useSceneStore = defineStore('scene', () => {
     redoStack.value = []
   }
 
-  /** 用去抖限制高频变更的快照记录频率。 */
-  function scheduleHistorySnapshot() {
+  /**
+   * 智能推入历史快照：
+   * - 关键操作（增删、类型变更）立即推入
+   * - 普通操作（transform 拖拽等）走去抖，避免频繁推入
+   */
+  function scheduleHistorySnapshot(isCritical = false) {
     if (isRestoring.value) return
-    if (!lastSnapshot.value) lastSnapshot.value = createSnapshot()
-    if (!historyDebounceTimer.value) {
-      // 去抖的第一次进入立刻记录，避免丢掉“起点”
-      pushHistorySnapshot(lastSnapshot.value)
-    }
-    if (historyDebounceTimer.value) {
-      clearTimeout(historyDebounceTimer.value)
-    }
-    historyDebounceTimer.value = setTimeout(() => {
-      historyDebounceTimer.value = null
-      // 去抖结束后刷新最新快照作为下一次起点
+    
+    // 关键操作立即推入，不走去抖
+    if (isCritical) {
+      // 标记关键操作，让 watch 回调知道这是关键操作（避免重复推入）
+      // 注意：由于 watch 的 flush 是 'sync'，会在数据变更后立即执行，
+      // 所以标记需要在推入前设置，并在下一个 tick 清除
+      pendingCriticalOperation.value = true
+      // 如果有待处理的去抖，先取消它并推入当前状态
+      if (historyDebounceTimer.value) {
+        clearTimeout(historyDebounceTimer.value)
+        historyDebounceTimer.value = null
+      }
+      pushHistorySnapshot()
       lastSnapshot.value = createSnapshot()
-    }, historyDebounceMs.value)
+      // 在下一个 tick 清除标记，确保 watch 回调能检测到
+      // 使用 nextTick 确保 watch 回调先执行
+      return
+    }
+    
+    // 普通操作走去抖（仅当没有关键操作标记时）
+    if (!pendingCriticalOperation.value) {
+      if (!lastSnapshot.value) lastSnapshot.value = createSnapshot()
+      
+      if (!historyDebounceTimer.value) {
+        // 去抖的第一次进入立刻记录，避免丢掉"起点"
+        pushHistorySnapshot(lastSnapshot.value)
+      }
+      if (historyDebounceTimer.value) {
+        clearTimeout(historyDebounceTimer.value)
+      }
+      historyDebounceTimer.value = setTimeout(() => {
+        historyDebounceTimer.value = null
+        // 去抖结束后刷新最新快照作为下一次起点
+        lastSnapshot.value = createSnapshot()
+      }, historyDebounceMs.value)
+    }
   }
 
   /** 恢复快照并基于数据重建 three 对象映射。 */
@@ -470,6 +538,8 @@ export const useSceneStore = defineStore('scene', () => {
     parent?.add(obj)
   }
 
+  // ---------- 对象增删改查与 three 同步 ----------
+
   // 新增场景对象（含 three 层同步）
   function addSceneObjectData(input: SceneObjectInput, options?: { addToThree?: boolean }) {
     const id = input.id ?? `obj-${aIds.value++}`;
@@ -488,6 +558,12 @@ export const useSceneStore = defineStore('scene', () => {
       attachThreeObject(newObj);// 挂载到 three 层
     }
 
+    // 新增对象是关键操作，立即推入历史
+    scheduleHistorySnapshot(true)
+    // 清除关键操作标记（在下一个 tick，确保 watch 回调已执行）
+    nextTick(() => {
+      pendingCriticalOperation.value = false
+    })
     return newObj;
   }
 
@@ -508,6 +584,11 @@ export const useSceneStore = defineStore('scene', () => {
       && patch.userData !== undefined
       && (patch.userData as any)?.lightType !== (target.userData as any)?.lightType
     const assetChanged = patch.assetId !== undefined && patch.assetId !== target.assetId
+    const parentChanged = patch.parentId !== undefined && patch.parentId !== prevParentId
+    
+    // 判断是否为关键操作：类型变更、helper变更、光源类型变更、父节点变更、资产变更
+    // 仅 transform 更新（拖拽）视为普通操作，走去抖
+    const isCritical = typeChanged || helperChanged || lightTypeChanged || parentChanged || assetChanged || meshChanged
     let meshRebuilt = false
     if (typeChanged || helperChanged || lightTypeChanged) { // 类型或helper配置变更需要重建three对象
       const old = objectsMap.value.get(id) // 取出现有three对象
@@ -534,7 +615,6 @@ export const useSceneStore = defineStore('scene', () => {
     const obj = objectsMap.value.get(id) // 获取对应three对象
     if (obj) syncThreeObjectState(obj, nextData) // 同步位姿和渲染状态到three对象
 
-    const parentChanged = patch.parentId !== undefined && patch.parentId !== prevParentId // 判断父节点是否变化
     if (parentChanged) { // 父节点变了需要更新关系和挂载
       if (prevParentId) removeChildFromParent(prevParentId, id) // 从旧父节点移除引用
       if (patch.parentId) addChildToParent(patch.parentId, id) // 添加到新父节点引用
@@ -563,6 +643,14 @@ export const useSceneStore = defineStore('scene', () => {
       void loadModelAssetIntoObject(nextData.assetId, id)
     }
 
+    // 根据操作类型决定推入策略：关键操作立即推入，普通操作（仅 transform）走去抖
+    scheduleHistorySnapshot(isCritical)
+    // 如果是关键操作，清除标记（在下一个 tick，确保 watch 回调已执行）
+    if (isCritical) {
+      nextTick(() => {
+        pendingCriticalOperation.value = false
+      })
+    }
     return target // 返回更新后的数据
   }
 
@@ -603,6 +691,13 @@ export const useSceneStore = defineStore('scene', () => {
     if (selectedObjectId.value && idsToRemove.has(selectedObjectId.value)) {
       selectedObjectId.value = null
     }
+
+    // 删除对象是关键操作，立即推入历史
+    scheduleHistorySnapshot(true)
+    // 清除关键操作标记（在下一个 tick，确保 watch 回调已执行）
+    nextTick(() => {
+      pendingCriticalOperation.value = false
+    })
   }
 
   // function disposeMaterial(material: any, disposedMaterials: Set<unknown>, disposedTextures: Set<unknown>) {
@@ -664,64 +759,66 @@ export const useSceneStore = defineStore('scene', () => {
   // }
 
   function clearScene() {
-    useRenderer().stop();
-    // const seen = new Set<Object3D>()
-    // const disposedGeometries = new Set<unknown>()
-    // const disposedMaterials = new Set<unknown>()
-    // const disposedTextures = new Set<unknown>()
-
-    // objectsMap.value.forEach(obj => disposeObject(obj, seen, disposedGeometries, disposedMaterials, disposedTextures))
-    // threeScene.value?.children.slice().forEach(child => disposeObject(child, seen, disposedGeometries, disposedMaterials, disposedTextures))
+    // 停止当前渲染循环，但 renderer 的创建/销毁由 useRenderer 负责
+    renderer.value?.setAnimationLoop(null as any)
 
     objectsMap.value.clear()
     objectDataList.value = []
     selectedObjectId.value = null
 
-    threeScene.value?.clear();
-    webGPURenderer.value?.dispose();
-    webGPURenderer.value?.domElement.remove();
-    webGPURenderer.value = null;
+    threeScene.value?.clear()
     threeScene.value = null
   }
 
-  async function saveScene() {
-    const db = getDB() // 获取数据库实例
-    // await db.update_by_primaryKey({
-    //   tableName: 'sceneData',
-    //   value: 1,
-    //   handle: r => {
-    //     r.name = '测试修改';
-    //     return r;
-    //   }
-    // })
-    await db.update_by_primaryKey({
-      tableName: 'sceneData', // 目标表
-      value: 1, // 主键id
-      handle: (row: any) => { // 返回更新后的记录
-        row.id = row.id ?? 1
-        row.name = name.value
-        row.version = version.value
-        row.aIds = aIds.value
-        row.objectDataList = JSON.stringify(objectDataList.value)
-        row.assets = JSON.stringify(assets.value)
-        row.rendererSettings = JSON.stringify(rendererSettings.value)
-        row.updatedAt = new Date()
-        return row
-      }
-    })
-    
-    notification.value!!.success({
-      content: '保存成功！',
-      // meta: '想不出来',
-      duration: 2500,
-      keepAliveOnHover: true
-    })
+  async function saveScene(sceneId?: number) {
+    const targetId = sceneId ?? currentSceneId.value
+    if (!targetId) {
+      notification.value?.error({
+        content: '无法保存：场景ID不存在',
+        duration: 2500
+      })
+      return
+    }
+
+    // 使用 sceneApi 保存，优先保存到云端
+    const { sceneApi } = await import('@/services/sceneApi')
+    try {
+      await sceneApi.saveScene(targetId, {
+        name: name.value,
+        aIds: aIds.value,
+        version: version.value,
+        objectDataList: objectDataList.value,
+        assets: assets.value,
+        rendererSettings: rendererSettings.value
+      })
+      
+      notification.value!!.success({
+        content: '保存成功！',
+        duration: 2500,
+        keepAliveOnHover: true
+      })
+    } catch (error: any) {
+      console.error('保存场景失败:', error)
+      notification.value?.error({
+        content: `保存失败: ${error.message || '未知错误'}`,
+        duration: 2500
+      })
+    }
   }
 
-  /** 统一监听器：所有数据变化都走去抖快照。 */
+  /** 
+   * 统一监听器：自动检测数据变化并推入历史。
+   * 注意：关键操作（增删、类型变更）已在各自函数中立即推入（通过 scheduleHistorySnapshot(true)），
+   * 这里主要作为兜底机制，处理一些直接修改 objectDataList 的情况。
+   * 如果 pendingCriticalOperation 被标记，说明关键操作已处理，跳过避免重复推入。
+   * 否则，作为普通操作走去抖（主要用于 transform 拖拽等高频操作）。
+   */
   watch(objectDataList, () => {
-    // 所有变更统一进入去抖记录
-    scheduleHistorySnapshot()
+    // 如果关键操作已处理（标记为 true 后立即被清除），跳过避免重复推入
+    // 否则，作为普通操作走去抖
+    if (!pendingCriticalOperation.value) {
+      scheduleHistorySnapshot(false)
+    }
   }, { deep: true, flush: 'sync' })
 
   return {
@@ -729,18 +826,24 @@ export const useSceneStore = defineStore('scene', () => {
     name,
     version,
     aIds,
+    currentSceneId,
     objectsMap,
     objectDataList,
     // 当前选中对象ID
     selectedObjectId,
     selectionVersion,
     selectedObjectData,
-    cureentObjectData,
+    currentObjectData,
     setThreeScene,
     addSceneObjectData,
     updateSceneObjectData,
     removeSceneObjectData,
     importModelFile,
+    registerLocalAsset,
+    registerRemoteAsset,
+    uploadAsset,
+    getAssetById,
+    resolveAssetUri,
     undo,
     redo,
     // 获取树形结构
@@ -748,7 +851,7 @@ export const useSceneStore = defineStore('scene', () => {
     applyObjectTree,
 
     threeScene,
-    webGPURenderer,
+    renderer,
     rendererSettings,
     assets,
 

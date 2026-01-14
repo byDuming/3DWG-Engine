@@ -4,12 +4,12 @@
   import type { CameraSettings } from '@/interfaces/sceneInterface'
 
   const sceneStore = useSceneStore()
-  const cameraSettings = computed(() => sceneStore.cureentObjectData?.camera as CameraSettings | undefined)
+  const cameraSettings = computed(() => sceneStore.currentObjectData?.camera as CameraSettings | undefined)
 
   function updateCameraSettings(patch: Partial<CameraSettings>) {
     const id = sceneStore.selectedObjectId
     if (!id) return
-    const current = sceneStore.cureentObjectData?.camera ?? {}
+    const current = sceneStore.currentObjectData?.camera ?? {}
     sceneStore.updateSceneObjectData(id, { camera: { ...current, ...patch } } as any)
   }
 </script>

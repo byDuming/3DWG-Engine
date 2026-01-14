@@ -1,4 +1,3 @@
-<script lang="ts">
 import { defineStore } from 'pinia'
 import { nextTick, ref } from 'vue'
 
@@ -21,6 +20,3 @@ export const useUiEditorStore = defineStore('uiEditor', () => {
     resetTabForSelection
   }
 })
-
-export default {}
-</script>

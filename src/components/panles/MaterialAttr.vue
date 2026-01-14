@@ -18,7 +18,7 @@
   const sceneStore = useSceneStore()
 
   // 当前选中对象的材质数据
-  const material = computed(() => sceneStore.cureentObjectData?.mesh?.material as MaterialData | undefined)
+  const material = computed(() => sceneStore.currentObjectData?.mesh?.material as MaterialData | undefined)
   const materialType = computed(() => material.value?.type)
 
   const showMapFields = computed(() => ['basic', 'lambert', 'phong', 'standard', 'physical', 'toon', 'sprite', 'points'].includes(materialType.value ?? ''))
@@ -160,7 +160,7 @@
   function updateMaterial(patch: Record<string, unknown>) {
     const id = sceneStore.selectedObjectId
     if (!id) return
-    const currentMesh = sceneStore.cureentObjectData?.mesh
+    const currentMesh = sceneStore.currentObjectData?.mesh
     if (!currentMesh?.material) return
     const nextMaterial = { ...currentMesh.material, ...patch }
     const nextMesh = { ...currentMesh, material: nextMaterial }
@@ -197,7 +197,7 @@
     if (nextType === materialType.value) return
     const id = sceneStore.selectedObjectId
     if (!id) return
-    const currentMesh = sceneStore.cureentObjectData?.mesh
+    const currentMesh = sceneStore.currentObjectData?.mesh
     if (!currentMesh) return
     const nextMaterial = createDefaultMaterialData(nextType)
     const nextMesh = { ...currentMesh, material: nextMaterial }

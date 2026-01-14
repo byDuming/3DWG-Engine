@@ -1,8 +1,9 @@
 <script setup lang="ts">
   import { type TreeDropInfo, type TreeOption, NIcon, type DropdownOption, type UploadFileInfo } from 'naive-ui'
   import { ref, computed, watch, watchEffect, h, type Component } from 'vue'
-  import { Cube, OptionsSharp, CubeOutline, ColorPalette, Camera, Move, Resize, Earth, ArrowUndo, ArrowRedo, SettingsOutline } from '@vicons/ionicons5'
+  import { Cube, OptionsSharp, CubeOutline, ColorPalette, Camera, Move, Resize, Earth, ArrowUndo, ArrowRedo, SettingsOutline, FolderOutline } from '@vicons/ionicons5'
   import { TextureOutlined, DeleteFilled, DriveFileRenameOutlineRound, LightbulbOutlined, Md3DRotationFilled, PlaceFilled } from '@vicons/material'
+  import { Cubes } from '@vicons/fa'
 
   import AttributesPanel from './panles/Attributes.vue'
   import GeometryAttrPanel from './panles/GeometryAttr.vue'
@@ -12,10 +13,25 @@
   import CameraAttrPanel from './panles/CameraAttr.vue'
   import LightAttrPanel from './panles/LightAttr.vue'
   import ProjectAttrPanel from './panles/ProjectAttr.vue'
+  import AssetManagerPanel from './panles/AssetManager.vue'
   import { useSceneStore } from '@/stores/modules/useScene.store'
-  import { useUiEditorStore } from '@/stores/modules/uiEditor.store.vue'
+  import { useUiEditorStore } from '@/stores/modules/uiEditor.store.ts'
   import { geometryTypeOptions } from '@/types/geometry'
 
+  /**
+   * 左侧编辑面板：
+   * - 上半部分：层级树（n-tree）+ 拖拽排序 + 右键菜单（删除等）
+   * - 左侧浮动按钮：变换模式切换（平移/旋转/缩放）、世界/本地、撤销/重做、快速创建对象、导入模型
+   * - 下半部分：Tab 属性面板（根据当前选中对象类型动态筛选可见的 Tab）
+   *
+   * 数据来源：
+   * - useSceneStore：场景对象树、当前选中对象、transform 模式等
+   * - useUiEditorStore：当前激活的 Tab（属性/场景/相机/光源/工程等）
+   *
+   * 交互约定：
+   * - 所有对场景结构的修改最终都回写到 useSceneStore（applyObjectTree / addSceneObjectData / removeSceneObjectData）
+   * - 撤销/重做由 store 管理，这里只调用 undo / redo
+   */
   const sceneStore = useSceneStore()
   const uiEditorStore = useUiEditorStore()
 
@@ -23,6 +39,8 @@
   watchEffect(() => {
     treeData.value = sceneStore.getObjectTree()
   })
+
+  // 下面内容与原 LeftEditPanle.vue 一致，仅命名规范化
 
   function findSiblingsAndIndex(
     node: TreeOption,
@@ -120,8 +138,8 @@
   function handleSelect(key: string | number) {
     switch (key) {
       case 'delete-object': {
-        const name = sceneStore.cureentObjectData?.name ?? ''
-        const childCount = sceneStore.cureentObjectData?.childrenIds?.length || 0
+        const name = sceneStore.currentObjectData?.name ?? ''
+        const childCount = sceneStore.currentObjectData?.childrenIds?.length || 0
         sceneStore.dialogProvider?.warning({
           title: 'Warning',
           content: `Delete "${name}"? Its ${childCount} child object(s) will also be removed.`,
@@ -179,7 +197,7 @@
   }, { immediate: true })
 
   const tabs = computed(() => {
-    const currentType = sceneStore.cureentObjectData?.type
+    const currentType = sceneStore.currentObjectData?.type
     const isMesh = currentType === 'mesh'
     const isHelper = currentType === 'helper'
     const isScene = currentType === 'scene'
@@ -190,6 +208,7 @@
     )
     return [
       { name: 'attributes-tab', icon: OptionsSharp, label: '属性', component: AttributesPanel, isShow: true },
+      { name: 'assets-tab', icon: FolderOutline, label: '模型库', component: AssetManagerPanel, isShow: true },
       { name: 'scene-tab', icon: ColorPalette, label: '场景属性', component: SceneAttrPanel, isShow: isScene },
       { name: 'camera-tab', icon: Camera, label: '相机属性', component: CameraAttrPanel, isShow: isCamera },
       { name: 'light-tab', icon: LightbulbOutlined, label: '光源属性', component: LightAttrPanel, isShow: isLight },
@@ -442,13 +461,24 @@
         <template #trigger>
           <n-float-button shape="square" style="z-index: 10; margin-left: -80px; position: relative;">
             <n-icon>
-              <Md3DRotationFilled />
+              <Cubes />
             </n-icon>
           </n-float-button>
         </template>
         导入模型
       </n-tooltip>
     </n-upload>
+    <!-- open model library -->
+    <n-tooltip trigger="hover" placement="right">
+      <template #trigger>
+        <n-float-button shape="square" style="z-index: 10; margin-left: -80px; position: relative;" @click="uiEditorStore.setTabKey('assets-tab')">
+          <n-icon>
+            <FolderOutline />
+          </n-icon>
+        </n-float-button>
+      </template>
+      模型库
+    </n-tooltip>
   </n-flex>
 
   <n-dropdown
@@ -477,6 +507,7 @@
   />
 
   <n-divider />
+
   <n-tabs
     type="line"
     animated
@@ -498,8 +529,8 @@
           </n-popover>
         </template>
         <!-- 属性面板内容 -->
-        <component v-if="tab.name === 'project-tab'" :is="tab.component" />
-        <component v-else-if="sceneStore.cureentObjectData" :is="tab.component" />
+        <component v-if="tab.name === 'project-tab' || tab.name === 'assets-tab'" :is="tab.component" />
+        <component v-else-if="sceneStore.currentObjectData" :is="tab.component" />
         <n-empty v-else description="未选择对象" />
       </n-tab-pane>
     </template>
@@ -515,3 +546,4 @@
     color: #90A4AE;
   }
 </style>
+

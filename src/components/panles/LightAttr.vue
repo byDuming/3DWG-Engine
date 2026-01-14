@@ -4,7 +4,7 @@
 
   const sceneStore = useSceneStore()
 
-  const lightData = computed(() => sceneStore.cureentObjectData?.userData ?? {})
+  const lightData = computed(() => sceneStore.currentObjectData?.userData ?? {})
   const lightType = computed(() => (lightData.value as any)?.lightType ?? '')
 
   const lightTypeOptions = [
@@ -19,7 +19,7 @@
   function updateLight(patch: Record<string, unknown>) {
     const id = sceneStore.selectedObjectId
     if (!id) return
-    const current = sceneStore.cureentObjectData?.userData ?? {}
+    const current = sceneStore.currentObjectData?.userData ?? {}
     sceneStore.updateSceneObjectData(id, { userData: { ...current, ...patch } } as any)
   }
 

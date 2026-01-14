@@ -8,7 +8,7 @@
   function updateTransform(key: TransformKey, axis: 0 | 1 | 2, value: number | null) {
     const id = sceneStore.selectedObjectId
     if (!id) return
-    const current = sceneStore.cureentObjectData?.transform[key] ?? [0, 0, 0]
+    const current = sceneStore.currentObjectData?.transform[key] ?? [0, 0, 0]
     const next = [...current] as [number, number, number]
     next[axis] = Number(value ?? 0)
     sceneStore.updateSceneObjectData(id, { transform: { [key]: next } } as any)
@@ -29,7 +29,7 @@
   function setHorizontalRotation() {
     const id = sceneStore.selectedObjectId
     if (!id) return
-    const current = sceneStore.cureentObjectData?.transform.rotation ?? [0, 0, 0]
+    const current = sceneStore.currentObjectData?.transform.rotation ?? [0, 0, 0]
     const snap = (value: number) => {
       const step = Math.PI / 2
       return Math.round(value / step) * step
@@ -55,7 +55,7 @@
         ID
       </n-gi>
       <n-gi class="gid-item" :span="6">
-        <n-input :value="sceneStore.cureentObjectData?.id" type="text" placeholder="ID" disabled />
+        <n-input :value="sceneStore.currentObjectData?.id" type="text" placeholder="ID" disabled />
       </n-gi>
     </n-grid>
     <n-grid x-gap="12" :cols="8">
@@ -63,7 +63,7 @@
         类型
       </n-gi>
       <n-gi class="gid-item" :span="6">
-        <n-input :value="sceneStore.cureentObjectData?.type" type="text" placeholder="类型" disabled />
+        <n-input :value="sceneStore.currentObjectData?.type" type="text" placeholder="类型" disabled />
       </n-gi>
     </n-grid>
 
@@ -76,7 +76,7 @@
       <n-gi class="gid-item" :span="3">
         <n-input-number
           placeholder="X"
-          :value="sceneStore.cureentObjectData?.transform.position[0]"
+          :value="sceneStore.currentObjectData?.transform.position[0]"
           @update:value="(v:number) => updateTransform('position', 0, v)"
           :show-button="false"
         />
@@ -84,7 +84,7 @@
       <n-gi class="gid-item" :span="3">
         <n-input-number
           placeholder="Y"
-          :value="sceneStore.cureentObjectData?.transform.position[1]"
+          :value="sceneStore.currentObjectData?.transform.position[1]"
           @update:value="(v:number) => updateTransform('position', 1, v)"
           :show-button="false"
         />
@@ -92,7 +92,7 @@
       <n-gi class="gid-item" :span="3">
         <n-input-number
           placeholder="Z"
-          :value="sceneStore.cureentObjectData?.transform.position[2]"
+          :value="sceneStore.currentObjectData?.transform.position[2]"
           @update:value="(v:number) => updateTransform('position', 2, v)"
           :show-button="false"
         />
@@ -108,7 +108,7 @@
       <n-gi class="gid-item" :span="3">
         <n-input-number
           placeholder="X"
-          :value="sceneStore.cureentObjectData?.transform.rotation[0]"
+          :value="sceneStore.currentObjectData?.transform.rotation[0]"
           @update:value="(v:number) => updateTransform('rotation', 0, v)"
           :show-button="false"
         />
@@ -116,7 +116,7 @@
       <n-gi class="gid-item" :span="3">
         <n-input-number
           placeholder="Y"
-          :value="sceneStore.cureentObjectData?.transform.rotation[1]"
+          :value="sceneStore.currentObjectData?.transform.rotation[1]"
           @update:value="(v:number) => updateTransform('rotation', 1, v)"
           :show-button="false"
         />
@@ -124,7 +124,7 @@
       <n-gi class="gid-item" :span="3">
         <n-input-number
           placeholder="Z"
-          :value="sceneStore.cureentObjectData?.transform.rotation[2]"
+          :value="sceneStore.currentObjectData?.transform.rotation[2]"
           @update:value="(v:number) => updateTransform('rotation', 2, v)"
           :show-button="false"
         />
@@ -146,7 +146,7 @@
       <n-gi class="gid-item" :span="3">
         <n-input-number
           placeholder="X"
-          :value="sceneStore.cureentObjectData?.transform.scale[0]"
+          :value="sceneStore.currentObjectData?.transform.scale[0]"
           @update:value="(v:number) => updateTransform('scale', 0, v)"
           :show-button="false"
         />
@@ -154,7 +154,7 @@
       <n-gi class="gid-item" :span="3">
         <n-input-number
           placeholder="Y"
-          :value="sceneStore.cureentObjectData?.transform.scale[1]"
+          :value="sceneStore.currentObjectData?.transform.scale[1]"
           @update:value="(v:number) => updateTransform('scale', 1, v)"
           :show-button="false"
         />
@@ -162,7 +162,7 @@
       <n-gi class="gid-item" :span="3">
         <n-input-number
           placeholder="Z"
-          :value="sceneStore.cureentObjectData?.transform.scale[2]"
+          :value="sceneStore.currentObjectData?.transform.scale[2]"
           @update:value="(v:number) => updateTransform('scale', 2, v)"
           :show-button="false"
         />
@@ -177,7 +177,7 @@
       </n-gi>
       <n-gi class="gid-item" :span="4">
         <n-switch
-          :value="sceneStore.cureentObjectData?.visible"
+          :value="sceneStore.currentObjectData?.visible"
           @update:value="(v:boolean) => updateVisible(v)"
         />
       </n-gi>
@@ -187,7 +187,7 @@
       </n-gi>
       <n-gi class="gid-item" :span="3">
         <n-switch
-          :value="sceneStore.cureentObjectData?.frustumCulled"
+          :value="sceneStore.currentObjectData?.frustumCulled"
           @update:value="(v:boolean) => updateFrustumCulled(v)"
         />
       </n-gi>
@@ -200,7 +200,7 @@
       </n-gi>
       <n-gi class="gid-item" :span="4">
         <n-switch
-          :value="sceneStore.cureentObjectData?.castShadow"
+          :value="sceneStore.currentObjectData?.castShadow"
           @update:value="(v:boolean) => sceneStore.updateSceneObjectData(sceneStore.selectedObjectId!, { castShadow: v } as any)"
         />
       </n-gi>
@@ -210,7 +210,7 @@
       </n-gi>
       <n-gi class="gid-item" :span="3">
         <n-switch
-          :value="sceneStore.cureentObjectData?.receiveShadow"
+          :value="sceneStore.currentObjectData?.receiveShadow"
           @update:value="(v:boolean) => sceneStore.updateSceneObjectData(sceneStore.selectedObjectId!, { receiveShadow: v } as any)"
         />
       </n-gi>
@@ -224,7 +224,7 @@
       <n-gi class="gid-item" :span="7">
         <n-input-number
           placeholder="从低到高"
-          :value="sceneStore.cureentObjectData?.renderOrder"
+          :value="sceneStore.currentObjectData?.renderOrder"
           :validator="(x: number) => x >= 0"
           @update:value="(v:number) => sceneStore.updateSceneObjectData(sceneStore.selectedObjectId!, { renderOrder: v } as any)"
         />
@@ -237,7 +237,7 @@
       </n-gi>
       <n-gi class="gid-item" :span="7">
         <n-switch
-          :value="sceneStore.cureentObjectData?.selectable ?? true"
+          :value="sceneStore.currentObjectData?.selectable ?? true"
           @update:value="(v:boolean) => sceneStore.updateSceneObjectData(sceneStore.selectedObjectId!, { selectable: v } as any)"
         />
       </n-gi>
