@@ -26,12 +26,14 @@
    - 确认 GitHub 仓库名称
    - 如果名称不是 `3DWG-Engine`，修改 `vite.config.ts` 中的 `base` 配置
 
-2. **配置 GitHub Secrets**（如果需要云同步功能）
-   - 进入 GitHub 仓库 → Settings → Secrets and variables → Actions
-   - 添加以下 Secrets：
-     - `VITE_SUPABASE_URL`：你的 Supabase 项目 URL
-     - `VITE_SUPABASE_ANON_KEY`：你的 Supabase anon key
-   - **注意**：如果不配置，应用仍可运行，但云同步功能不可用
+2. **配置环境变量**（本地开发）
+   - 在项目根目录创建 `.env` 文件（如果不存在）
+   - 参考 `env.example` 文件，填入你的 Supabase 配置：
+     ```env
+     VITE_SUPABASE_URL=你的_Project_URL
+     VITE_SUPABASE_ANON_KEY=你的_anon_key
+     ```
+   - **注意**：`.env` 文件不会被提交到 Git（已在 `.gitignore` 中），这是安全最佳实践
 
 3. **启用 GitHub Pages**
    - 进入 GitHub 仓库 → Settings → Pages
@@ -79,9 +81,13 @@
 - **原因**：路径配置问题
 - **解决**：确保所有资源路径使用相对路径或 `import.meta.env.BASE_URL`
 
-### 3. 云同步功能不可用
-- **原因**：未配置 GitHub Secrets
-- **解决**：按照上述步骤配置 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_ANON_KEY`
+### 3. 云同步功能不可用 / 显示配置缺失警告
+- **原因**：未配置 GitHub Secrets，导致构建时环境变量为空
+- **解决**：
+  1. 按照上述步骤在 GitHub Secrets 中配置 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_ANON_KEY`
+  2. 重新触发构建（推送新代码或手动触发 workflow_dispatch）
+  3. 构建日志中会显示是否成功读取环境变量
+- **注意**：即使未配置，应用仍可正常运行，只是会使用本地存储模式
 
 ### 4. 构建失败
 - **检查**：GitHub Actions 日志

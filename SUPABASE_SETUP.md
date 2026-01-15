@@ -19,19 +19,38 @@
 
 ## 第三步：配置环境变量
 
-1. 在项目根目录创建 `.env` 文件（如果不存在）
-2. 添加以下内容：
+### 本地开发环境
 
-```env
-VITE_SUPABASE_URL=你的_Project_URL
-VITE_SUPABASE_ANON_KEY=你的_anon_key
-```
+1. 在项目根目录复制 `.env.example` 文件为 `.env`：
+   ```bash
+   cp .env.example .env
+   ```
+2. 编辑 `.env` 文件，填入你的 Supabase 配置：
+   ```env
+   VITE_SUPABASE_URL=你的_Project_URL
+   VITE_SUPABASE_ANON_KEY=你的_anon_key
+   ```
 
 **示例：**
 ```env
 VITE_SUPABASE_URL=https://xxxxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
+
+### GitHub Pages 部署环境
+
+**重要**：`.env` 文件不会被提交到 Git（已在 `.gitignore` 中），所以部署时需要配置 GitHub Secrets：
+
+1. 进入 GitHub 仓库 → **Settings** → **Secrets and variables** → **Actions**
+2. 点击 **"New repository secret"** 按钮
+3. 添加以下两个 Secrets（名称必须完全一致）：
+   - **Name**: `VITE_SUPABASE_URL`
+     **Value**: 你的 Supabase 项目 URL
+   - **Name**: `VITE_SUPABASE_ANON_KEY`
+     **Value**: 你的 Supabase anon key
+4. 保存后，GitHub Actions 构建时会自动使用这些环境变量
+
+**注意**：如果不配置 GitHub Secrets，应用仍可运行，但会回退到本地存储模式（不会显示警告，因为已在生产环境静默处理）
 
 ## 第四步：创建数据库表
 

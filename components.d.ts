@@ -17,7 +17,6 @@ declare module 'vue' {
     GeometryAttr: typeof import('./src/components/panles/GeometryAttr.vue')['default']
     HelperAttr: typeof import('./src/components/panles/HelperAttr.vue')['default']
     LeftEditPanel: typeof import('./src/components/LeftEditPanel.vue')['default']
-    LeftEditPanle: typeof import('./src/components/LeftEditPanle.vue')['default']
     LightAttr: typeof import('./src/components/panles/LightAttr.vue')['default']
     MaterialAttr: typeof import('./src/components/panles/MaterialAttr.vue')['default']
     NButton: typeof import('naive-ui')['NButton']

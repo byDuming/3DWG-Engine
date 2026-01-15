@@ -13,7 +13,7 @@
   const sceneStore = useSceneStore()
   const { container, initSceneBackground } = useRenderer()
   // container 在模板中使用 ref="container"
-  
+  // @ts-ignore - Vue 模板中的 ref 绑定，TypeScript 无法识别
   void container
 
   // 监听 objectDataList 变化，当数据加载后同步到 three.js
