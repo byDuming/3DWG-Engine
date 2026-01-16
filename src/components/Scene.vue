@@ -88,10 +88,12 @@
   }
 
   // 监听 sceneId 变化，支持动态切换场景
-  watch(() => props.sceneId, async (newId, oldId) => {
+  watch(() => props.sceneId, async (newId: number | null | undefined, oldId: number | null | undefined) => {
     // 只在 sceneId 真正变化时处理（排除初始化）
     if (newId !== oldId && oldId !== undefined) {
       if (newId) {
+        // 先清理旧场景
+        sceneStore.clearScene();
         const loaded = await loadSceneById(newId)
         if (!loaded) {
           sceneStore.currentSceneId = null
@@ -104,6 +106,7 @@
     }
   })
 
+  
   onMounted(async () => {
     // 注入通知和对话框到 store，供全局使用
     sceneStore.notification = useNotification()

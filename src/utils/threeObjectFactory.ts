@@ -352,9 +352,15 @@ function applyMaps(material: any, mat: MaterialData) {
 /** Sync Three transform from SceneObjectData */
 export function applyTransform(obj: Object3D, data: SceneObjectData) {
   const { position, rotation, scale } = data.transform
-  obj.position.set(position[0], position[1], position[2])
-  obj.rotation.set(rotation[0], rotation[1], rotation[2])
-  obj.scale.set(scale[0], scale[1], scale[2])
+  if(position){
+    obj.position.set(position[0], position[1], position[2])
+  }
+  if(rotation){
+    obj.rotation.set(rotation[0], rotation[1], rotation[2])
+  }
+  if(scale){
+    obj.scale.set(scale[0], scale[1], scale[2])
+  }
 }
 
 /** Sync common render-state attributes from SceneObjectData to a Three Object3D */

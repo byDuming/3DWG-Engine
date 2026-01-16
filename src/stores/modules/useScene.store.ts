@@ -815,6 +815,11 @@ export const useSceneStore = defineStore('scene', () => {
     if (obj) {
       if (!isCritical && patch.transform) {
         // transform 更新：只同步 transform，其他操作延迟
+        console.log('transform 更新')
+        console.log(nextData)
+        console.log(id)
+        console.log(patch.transform)
+        console.log(prevTransform)
         applyTransform(obj, nextData)
       } else {
         // 关键操作：完整同步

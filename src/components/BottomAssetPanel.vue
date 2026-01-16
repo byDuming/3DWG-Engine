@@ -312,7 +312,7 @@
                       :src="asset.thumbnail"
                       :alt="asset.name"
                     />
-                    <n-icon v-else size="32" color="rgba(255,255,255,0.6)">
+                    <n-icon v-else size="32" color="#1d1d1d">
                       <component :is="currentCategory.icon" />
                     </n-icon>
                     <!-- 悬停操作 -->
@@ -355,8 +355,8 @@
 
 <style scoped>
 .bottom-asset-panel {
-  background: #1e1e1e;
-  border-top: 1px solid #333;
+  /* background: #1e1e1e; */
+  /* border-top: 1px solid #333; */
   display: flex;
   flex-direction: column;
   transition: height 0.2s ease;
@@ -384,13 +384,13 @@
   align-items: center;
   justify-content: space-between;
   cursor: pointer;
-  background: #252525;
+  /* background: #252525; */
   user-select: none;
   flex-shrink: 0;
 }
 
 .panel-header:hover {
-  background: #2a2a2a;
+  /* background: #2a2a2a; */
 }
 
 .header-left {
@@ -402,7 +402,7 @@
 .title {
   font-size: 13px;
   font-weight: 500;
-  color: #e0e0e0;
+  color: #1d1d1d;
 }
 
 .header-right {
@@ -417,8 +417,8 @@
 
 .category-nav {
   width: 48px;
-  background: #1a1a1a;
-  border-right: 1px solid #333;
+  /* background: #1a1a1a; */
+  /* border-right: 1px solid #333; */
   display: flex;
   flex-direction: column;
   padding: 8px 0;
@@ -436,13 +436,13 @@
 }
 
 .category-item:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.05);
+  color: #1d1d1d;
+  /* background: rgba(255, 255, 255, 0.05); */
 }
 
 .category-item.active {
   color: #409eff;
-  background: rgba(64, 158, 255, 0.1);
+  /* background: rgba(64, 158, 255, 0.1); */
   border-left: 2px solid #409eff;
 }
 
@@ -459,7 +459,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #333;
+  /* border-bottom: 1px solid #333; */
   flex-shrink: 0;
 }
 
@@ -498,7 +498,7 @@
   cursor: pointer;
   border-radius: 6px;
   overflow: hidden;
-  background: #252525;
+  background: #eee;
   transition: all 0.15s;
 }
 
@@ -511,7 +511,7 @@
 .asset-preview {
   width: 100px;
   height: 80px;
-  background: linear-gradient(135deg, #2a2a3e 0%, #1a1a2e 100%);
+  /* background: linear-gradient(135deg, #2a2a3e 0%, #1a1a2e 100%); */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -528,7 +528,7 @@
 .asset-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  /* background: rgba(0, 0, 0, 0.7); */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -544,7 +544,7 @@
 .asset-name {
   padding: 6px 8px 2px;
   font-size: 11px;
-  color: #e0e0e0;
+  color: #1d1d1d;
 }
 
 .asset-size {

@@ -19,7 +19,7 @@ import { Raycaster, Vector2, Box3, Vector3, Object3D } from 'three'
 import { useSceneStore } from '@/stores/modules/useScene.store.ts'
 import { MapControls } from 'three/addons/controls/MapControls.js'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
-
+import { useUiEditorStore } from '@/stores/modules/uiEditor.store.ts'
 /**
  * 渲染器与交互控制逻辑（纯三维层，不关心 UI）：
  * - 创建并管理 WebGPU/WebGL Renderer（根据 store.rendererSettings 决定类型）
@@ -113,6 +113,7 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
   }
 
   function dispose() {
+    console.log('dispose')
     stop()
     const pendingTransform = detachTransformControls()
     const pendingControls = controls.value
@@ -136,10 +137,20 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
       window.removeEventListener('keydown', handleKeyDown)
       keyboardListenerAdded = false
     }
+    
+    sceneStore.renderer?.dispose()
     sceneStore.renderer = null
     sceneStore.threeScene = null
+
+    // 添加：清理场景数据
+    sceneStore.objectsMap.clear()
+    sceneStore.objectDataList = []
+    sceneStore.selectedObjectId = null
+
     camera.value = null
     transformControls.value = null
+
+    useUiEditorStore().closeAssetPanel();
   }
 
   let pendingAttachId: string | null = null
@@ -594,6 +605,7 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
   }
 
   onBeforeUnmount(() => {
+    console.log('onBeforeUnmount')
     window.removeEventListener('resize', resize)
     if (keyboardListenerAdded) {
       window.removeEventListener('keydown', handleKeyDown)

@@ -1,6 +1,6 @@
 <script setup lang="ts">
   import { type TreeDropInfo, type TreeOption, NIcon, type DropdownOption } from 'naive-ui'
-  import { ref, computed, watch, h, type Component } from 'vue'
+  import { ref, computed, watch, h, type Component} from 'vue'
   import { Cube, OptionsSharp, CubeOutline, ColorPalette, Camera, Move, Resize, Earth, ArrowUndo, ArrowRedo, SettingsOutline, FolderOutline } from '@vicons/ionicons5'
   import { TextureOutlined, DeleteFilled, DriveFileRenameOutlineRound, LightbulbOutlined, Md3DRotationFilled, PlaceFilled } from '@vicons/material'
 
@@ -55,8 +55,6 @@
   watch(() => sceneStore.objectDataList.length, scheduleTreeUpdate, { flush: 'post', immediate: true })
   // 监听历史版本变化（撤回/重做时，parentId 可能变化，需要更新树）
   watch(() => sceneStore.historyVersion, scheduleTreeUpdate, { flush: 'post' })
-
-  // 下面内容与原 LeftEditPanle.vue 一致，仅命名规范化
 
   function findSiblingsAndIndex(
     node: TreeOption,
@@ -148,15 +146,15 @@
         const name = sceneStore.currentObjectData?.name ?? ''
         const childCount = sceneStore.currentObjectData?.childrenIds?.length || 0
         sceneStore.dialogProvider?.warning({
-          title: 'Warning',
-          content: `Delete "${name}"? Its ${childCount} child object(s) will also be removed.`,
-          positiveText: 'Delete',
-          negativeText: 'Cancel',
+          title: '警告',
+          content: `确认删除 "${name}"? 它的 ${childCount} 个子对象也会被删除。`,
+          positiveText: '确认',
+          negativeText: '取消',
           draggable: true,
           onPositiveClick: () => {
             if (sceneStore.selectedObjectId) {
               sceneStore.notification?.success({
-                title: 'Deleted',
+                title: '删除成功',
                 content: `Object ID: ${sceneStore.selectedObjectId}\nChildren: ${childCount}`,
                 duration: 2000
               })
@@ -165,8 +163,8 @@
           },
           onNegativeClick: () => {
             sceneStore.notification?.error({
-              title: 'Cancelled',
-              content: 'Operation cancelled.',
+              title: '取消',
+              content: '操作取消。',
               duration: 2000
             })
           }
@@ -462,7 +460,7 @@
     <!-- open asset panel -->
     <n-tooltip trigger="hover" placement="right">
       <template #trigger>
-        <n-float-button shape="square" style="z-index: 10; margin-left: -80px; position: relative;" @click="uiEditorStore.openAssetPanel('model')">
+        <n-float-button shape="square" style="z-index: 10; margin-left: -80px; position: relative;" @click="uiEditorStore.isAssetPanelOpen ? uiEditorStore.closeAssetPanel() : uiEditorStore.openAssetPanel('model')">
           <n-icon>
             <FolderOutline />
           </n-icon>
