@@ -8,7 +8,7 @@ export const useUiEditorStore = defineStore('uiEditor', () => {
   
   // 底部资产面板状态
   const isAssetPanelOpen = ref(false)
-  const assetPanelHeight = ref(200)
+  const assetPanelHeight = ref(300)
   const activeAssetCategory = ref<AssetCategory>('model')
 
   function setTabKey(key: string | null) {

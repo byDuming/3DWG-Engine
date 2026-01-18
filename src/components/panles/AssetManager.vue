@@ -3,7 +3,7 @@
   import { useSceneStore } from '@/stores/modules/useScene.store'
   import { assetApi } from '@/services/assetApi'
   import { useMessage, useDialog, type UploadFileInfo } from 'naive-ui'
-  import { CloudUploadOutline, AddOutline, ImageOutline } from '@vicons/ionicons5'
+  import { CloudUploadOutline, AddOutline, ImageOutline, RefreshOutline } from '@vicons/ionicons5'
   import { DeleteFilled } from '@vicons/material'
   import type { AssetRef } from '@/types/asset'
 
@@ -14,10 +14,11 @@
   const uploading = ref(false)
   const modelUploadList = ref<UploadFileInfo[]>([])
   const loading = ref(false)
+  const globalAssets = ref<AssetRef[]>([])  // 全局资产列表
 
-  // 只显示云端模型资产
+  // 只显示模型类型的资产
   const modelAssets = computed(() => {
-    return sceneStore.assets.filter(a => a.type === 'model' && a.source === 'remote')
+    return globalAssets.value.filter(a => a.type === 'model')
   })
 
   // 格式化文件大小
@@ -28,12 +29,26 @@
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
   }
 
-  // 加载模型列表（从 store 获取）
+  // 加载全局资产列表
+  async function loadGlobalAssets() {
+    if (!assetApi.isStorageAvailable()) {
+      return
+    }
+    loading.value = true
+    try {
+      globalAssets.value = await assetApi.getGlobalAssets('model')
+    } catch (error) {
+      console.error('加载资产列表失败:', error)
+    } finally {
+      loading.value = false
+    }
+  }
+
   onMounted(() => {
-    // 资产已经在 store 中，这里可以触发刷新
+    loadGlobalAssets()
   })
 
-  // 上传模型文件到云端
+  // 上传模型文件到云端（全局共享，不再需要 sceneId）
   async function handleModelUpload(fileList: UploadFileInfo[]) {
     modelUploadList.value = fileList
     const file = fileList[0]?.file
@@ -45,16 +60,13 @@
       return
     }
 
-    if (!sceneStore.currentSceneId) {
-      message.error('请先创建或打开一个场景')
-      modelUploadList.value = []
-      return
-    }
-
     uploading.value = true
     try {
-      // 上传到云端
-      await sceneStore.uploadAsset(file, 'model', sceneStore.currentSceneId)
+      // 上传到云端（全局共享）
+      const result = await assetApi.uploadAsset({ file, type: 'model' })
+      globalAssets.value.unshift(result.asset)  // 添加到列表前面
+      // 同时注册到当前场景的 store（以便保存时使用）
+      sceneStore.registerRemoteAsset(result.asset)
       message.success(`模型 "${file.name}" 上传成功`)
     } catch (error: any) {
       console.error('上传模型失败:', error)
@@ -74,6 +86,9 @@
 
     try {
       loading.value = true
+      
+      // 注册资产到当前场景（如果还没注册）
+      sceneStore.registerRemoteAsset(asset)
       
       // 创建场景对象
       const parentId = sceneStore.selectedObjectId ?? 'Scene'
@@ -109,17 +124,17 @@
   async function handleDeleteModel(asset: AssetRef) {
     dialog.warning({
       title: '确认删除',
-      content: `确定要删除模型 "${asset.name}" 吗？此操作不可恢复。`,
+      content: `确定要删除模型 "${asset.name}" 吗？此操作不可恢复，所有使用该模型的场景都将受影响。`,
       positiveText: '确定',
       negativeText: '取消',
       onPositiveClick: async () => {
         try {
           const success = await assetApi.deleteAsset(asset)
           if (success) {
-            // 从 store 中移除
-            const index = sceneStore.assets.findIndex(a => a.id === asset.id)
+            // 从全局列表中移除
+            const index = globalAssets.value.findIndex(a => a.id === asset.id)
             if (index > -1) {
-              sceneStore.assets.splice(index, 1)
+              globalAssets.value.splice(index, 1)
             }
             message.success('删除成功')
           } else {
@@ -136,24 +151,31 @@
 
 <template>
   <div style="padding: 12px; height: 100%; display: flex; flex-direction: column;">
-    <!-- 标题和上传按钮 -->
+    <!-- 标题和操作按钮 -->
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-      <div style="font-weight: 500; font-size: 14px;">模型库</div>
-      <n-upload
-        :default-upload="false"
-        :show-file-list="false"
-        accept=".glb,.gltf"
-        :file-list="modelUploadList"
-        @update:file-list="handleModelUpload"
-        :disabled="uploading || !assetApi.isStorageAvailable()"
-      >
-        <n-button size="small" type="primary" :loading="uploading">
+      <div style="font-weight: 500; font-size: 14px;">全局模型库</div>
+      <n-space :size="8">
+        <n-button size="small" quaternary @click="loadGlobalAssets" :loading="loading">
           <template #icon>
-            <n-icon><CloudUploadOutline /></n-icon>
+            <n-icon><RefreshOutline /></n-icon>
           </template>
-          上传模型
         </n-button>
-      </n-upload>
+        <n-upload
+          :default-upload="false"
+          :show-file-list="false"
+          accept=".glb,.gltf"
+          :file-list="modelUploadList"
+          @update:file-list="handleModelUpload"
+          :disabled="uploading || !assetApi.isStorageAvailable()"
+        >
+          <n-button size="small" type="primary" :loading="uploading">
+            <template #icon>
+              <n-icon><CloudUploadOutline /></n-icon>
+            </template>
+            上传模型
+          </n-button>
+        </n-upload>
+      </n-space>
     </div>
 
     <!-- 模型网格列表 -->

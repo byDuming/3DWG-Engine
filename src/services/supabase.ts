@@ -23,5 +23,6 @@ export const supabase = createClient(supabaseUrl || 'https://placeholder.supabas
 // 数据库表名
 export const TABLES = {
   SCENES: 'scenes',
-  USERS: 'users'
+  USERS: 'users',
+  ASSETS: 'assets'
 } as const

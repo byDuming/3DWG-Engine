@@ -133,18 +133,17 @@ export const useSceneStore = defineStore('scene', () => {
   }
 
   /**
-   * 上传资产到云端存储
+   * 上传资产到云端存储（全局共享）
    * @param file 文件对象
    * @param type 资产类型
-   * @param sceneId 场景ID（可选，用于组织文件路径）
    * @returns 上传后的资产引用
    */
-  async function uploadAsset(file: File, type: AssetRef['type'], sceneId?: number): Promise<AssetRef> {
+  async function uploadAsset(file: File, type: AssetRef['type']): Promise<AssetRef> {
     if (!assetApi.isStorageAvailable()) {
       throw new Error('Supabase Storage 未配置，无法上传资产')
     }
 
-    const result = await assetApi.uploadAsset({ file, type, sceneId })
+    const result = await assetApi.uploadAsset({ file, type })
     const asset = registerRemoteAsset(result.asset)
     return asset
   }
@@ -600,7 +599,10 @@ export const useSceneStore = defineStore('scene', () => {
       const data = dataMap.get(id)
       if (!data) return
       if (obj.parent) obj.parent.remove(obj)
-      const parent = data.parentId ? objectsMap.value.get(data.parentId) : threeScene.value
+      // 处理 parentId：undefined/null/'Scene' 都表示挂载到场景根节点
+      const parent = (data.parentId !== undefined && data.parentId !== null && data.parentId !== 'Scene')
+        ? objectsMap.value.get(data.parentId)
+        : threeScene.value
       parent?.add(obj)
     })
 
@@ -1079,10 +1081,10 @@ export const useSceneStore = defineStore('scene', () => {
           const { blobToFile } = await import('@/utils/screenshot')
           const screenshotFile = blobToFile(screenshotBlob, `scene-${targetId}-thumbnail.png`)
           
-          // 上传到云存储
+          // 上传到云存储（全局共享）
           const { assetApi } = await import('@/services/assetApi')
           if (assetApi.isStorageAvailable()) {
-            const result = await uploadAsset(screenshotFile, 'image', targetId)
+            const result = await uploadAsset(screenshotFile, 'image')
             thumbnailUrl = result.uri
             console.log('✅ 场景截图已上传:', thumbnailUrl)
           } else {

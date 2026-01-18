@@ -42,3 +42,29 @@ CREATE TRIGGER update_scenes_updated_at
   BEFORE UPDATE ON scenes
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
+
+-- ========================================
+-- 创建独立的 assets 表（全局资产库）
+-- ========================================
+CREATE TABLE IF NOT EXISTS assets (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,          -- 'model' | 'texture' | 'image' | 'material' | 'hdri'
+  uri TEXT NOT NULL,
+  name TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'remote',
+  thumbnail TEXT,
+  meta JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 创建索引
+CREATE INDEX IF NOT EXISTS assets_type_idx ON assets(type);
+CREATE INDEX IF NOT EXISTS assets_created_at_idx ON assets(created_at DESC);
+
+-- 启用 RLS 并允许匿名访问
+ALTER TABLE assets ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow anonymous access on assets"
+  ON assets FOR ALL
+  USING (true)
+  WITH CHECK (true);

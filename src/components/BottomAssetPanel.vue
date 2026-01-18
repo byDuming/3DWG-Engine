@@ -1,5 +1,5 @@
 <script setup lang="ts">
-  import { ref, computed } from 'vue'
+  import { ref, computed, onMounted, watch } from 'vue'
   import { useSceneStore } from '@/stores/modules/useScene.store'
   import { useUiEditorStore, type AssetCategory } from '@/stores/modules/uiEditor.store'
   import { assetApi } from '@/services/assetApi'
@@ -28,6 +28,7 @@
   const isDragging = ref(false)
   const dragStartY = ref(0)
   const dragStartHeight = ref(0)
+  const globalAssets = ref<AssetRef[]>([])  // 全局资产列表
 
   // 资产类别配置
   const categories: Array<{ key: AssetCategory; label: string; icon: any; accept: string; description: string }> = [
@@ -42,16 +43,40 @@
     return categories.find(c => c.key === uiEditorStore.activeAssetCategory) ?? categories[0]!
   })
 
-  // 根据类别筛选资产
+  // 加载全局资产列表
+  async function loadGlobalAssets(type?: AssetRef['type']) {
+    if (!assetApi.isStorageAvailable()) {
+      return
+    }
+    loading.value = true
+    try {
+      globalAssets.value = await assetApi.getGlobalAssets(type)
+    } catch (error) {
+      console.error('加载资产列表失败:', error)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  // 根据类别筛选资产（从全局资产列表筛选）
   const filteredAssets = computed(() => {
     const category = uiEditorStore.activeAssetCategory
-    return sceneStore.assets.filter(a => {
+    return globalAssets.value.filter(a => {
       if (category === 'model') return a.type === 'model' && a.source === 'remote'
       if (category === 'texture') return a.type === 'texture' && a.source === 'remote'
       if (category === 'material') return a.type === 'material'
       if (category === 'hdri') return a.type === 'hdri'
       return false
     })
+  })
+
+  // 切换类别时重新加载对应类型的资产
+  watch(() => uiEditorStore.activeAssetCategory, (newCategory) => {
+    loadGlobalAssets(newCategory as AssetRef['type'])
+  })
+
+  onMounted(() => {
+    loadGlobalAssets(uiEditorStore.activeAssetCategory as AssetRef['type'])
   })
 
   // 格式化文件大小
@@ -74,15 +99,11 @@
       return
     }
 
-    if (!sceneStore.currentSceneId) {
-      message.error('请先创建或打开一个场景')
-      modelUploadList.value = []
-      return
-    }
-
     uploading.value = true
     try {
-      await sceneStore.uploadAsset(file, uiEditorStore.activeAssetCategory, sceneStore.currentSceneId)
+      const result = await assetApi.uploadAsset({ file, type: uiEditorStore.activeAssetCategory as AssetRef['type'] })
+      globalAssets.value.unshift(result.asset)  // 添加到全局列表前面
+      sceneStore.registerRemoteAsset(result.asset)  // 同时注册到当前场景
       message.success(`"${file.name}" 上传成功`)
     } catch (error: any) {
       console.error('上传失败:', error)
@@ -102,6 +123,9 @@
 
     try {
       loading.value = true
+      // 注册资产到当前场景（确保场景保存时包含引用）
+      sceneStore.registerRemoteAsset(asset)
+      
       const parentId = sceneStore.selectedObjectId ?? 'Scene'
       const created = sceneStore.addSceneObjectData({
         type: 'model',
@@ -153,9 +177,10 @@
         try {
           const success = await assetApi.deleteAsset(asset)
           if (success) {
-            const index = sceneStore.assets.findIndex(a => a.id === asset.id)
+            // 从全局资产列表中移除
+            const index = globalAssets.value.findIndex(a => a.id === asset.id)
             if (index > -1) {
-              sceneStore.assets.splice(index, 1)
+              globalAssets.value.splice(index, 1)
             }
             message.success('删除成功')
           } else {

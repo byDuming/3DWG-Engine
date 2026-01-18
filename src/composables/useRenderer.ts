@@ -20,16 +20,17 @@ import { useSceneStore } from '@/stores/modules/useScene.store.ts'
 import { MapControls } from 'three/addons/controls/MapControls.js'
 import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import { useUiEditorStore } from '@/stores/modules/uiEditor.store.ts'
+
 /**
  * 渲染器与交互控制逻辑（纯三维层，不关心 UI）：
- * - 创建并管理 WebGPU/WebGL Renderer（根据 store.rendererSettings 决定类型）
+ * - 创建并管理 WebGPU/WebGL Renderer
  * - 维护相机、MapControls、TransformControls
- * - 负责射线选择（点击选中场景对象）、快捷键（W/E/R/V/F、Ctrl+Z/Y、Ctrl+S）
+ * - 负责射线选择、快捷键
+ * - 提供统一的场景切换接口 switchScene()
  *
  * 设计原则：
- * - three 场景和对象的数据来源完全依赖 useSceneStore（单一数据源）
- * - 渲染器的生命周期（创建 / 销毁）由本 composable 管理，store 只保存引用
- * - 清理逻辑尽量对称（rebuildRenderer / dispose）防止内存泄漏
+ * - 场景切换时保留渲染器，只替换场景内容
+ * - 所有初始化按正确顺序执行：场景 → 对象 → 相机 → 控制器 → 渲染
  */
 export function useRenderer(opts: { antialias?: boolean } = {}) {
   const sceneStore = useSceneStore()
@@ -40,13 +41,15 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
   const raycaster = new Raycaster()
   const pointer = new Vector2()
   let pointerDownPos: { x: number; y: number } | null = null
-  let isDraggingTransform = false // 标记是否正在拖动 TransformControls
-  let pendingTransformUpdate: { id: string; transform: { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] } } | null = null // 待提交的 transform 更新
-  let keyboardListenerAdded = false // 标记键盘事件监听器是否已添加
+  let isDraggingTransform = false
+  let pendingTransformUpdate: { id: string; transform: { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] } } | null = null
+  let keyboardListenerAdded = false
+  let isInitialized = false
 
-  function findCameraFromStore() {
-    const map = sceneStore.objectsMap as unknown as Map<string, PerspectiveCamera>
-    for (const obj of map.values()) {
+  // ==================== 相机管理 ====================
+
+  function findCameraFromStore(): PerspectiveCamera | null {
+    for (const obj of sceneStore.objectsMap.values()) {
       if ((obj as any).userData?.sceneObjectType === 'camera' && obj instanceof PerspectiveCamera) {
         return obj
       }
@@ -54,33 +57,129 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
     return null
   }
 
-  function ensureCamera() {
-    const existing = findCameraFromStore()
-    if (existing) {
-      camera.value = existing
-      return existing
+  function ensureCamera(): PerspectiveCamera | null {
+    // 1. 先从 objectsMap 中查找
+    let cam = findCameraFromStore()
+    if (cam) {
+      camera.value = cam
+      updateCameraAspect()
+      return cam
     }
 
+    // 2. 从 objectDataList 中查找
     const cameraData = sceneStore.objectDataList.find(item => item.type === 'camera')
-    const cameraObj = cameraData ? sceneStore.objectsMap.get(cameraData.id) : null
-    if (cameraObj instanceof PerspectiveCamera) {
-      camera.value = cameraObj
-      return cameraObj
+    if (cameraData) {
+      cam = sceneStore.objectsMap.get(cameraData.id) as PerspectiveCamera | undefined ?? null
+      if (cam instanceof PerspectiveCamera) {
+        camera.value = cam
+        updateCameraAspect()
+        return cam
+      }
     }
 
+    // 3. 创建默认相机
     const newCameraData = sceneStore.addSceneObjectData({
       type: 'camera',
       name: 'Main Camera',
       parentId: 'Scene',
       transform: { position: [25, 30, 20] }
     })
-    const created = sceneStore.objectsMap.get(newCameraData.id)
-    if (created instanceof PerspectiveCamera) {
-      camera.value = created
-      return created
+    cam = sceneStore.objectsMap.get(newCameraData.id) as PerspectiveCamera | undefined ?? null
+    if (cam instanceof PerspectiveCamera) {
+      camera.value = cam
+      updateCameraAspect()
+      return cam
     }
     return null
   }
+
+  function updateCameraAspect() {
+    if (!camera.value || !container.value) return
+    const w = container.value.clientWidth || window.innerWidth
+    const h = container.value.clientHeight || window.innerHeight
+    camera.value.aspect = w / h
+    camera.value.updateProjectionMatrix()
+  }
+
+  // ==================== 控制器管理 ====================
+
+  function setupControls() {
+    if (!camera.value || !container.value || !sceneStore.renderer) return
+
+    // 清理旧的控制器
+    if (controls.value) {
+      controls.value.dispose()
+      controls.value = null
+    }
+    if (transformControls.value) {
+      const gizmo = transformControls.value.getHelper()
+      sceneStore.threeScene?.remove(gizmo)
+      transformControls.value.dispose()
+      transformControls.value = null
+    }
+
+    // 创建 MapControls
+    controls.value = new MapControls(camera.value, container.value)
+    controls.value.target.set(0, 0, 0)
+
+    // 创建 TransformControls
+    transformControls.value = new TransformControls(camera.value, sceneStore.renderer.domElement)
+    
+    transformControls.value.addEventListener('dragging-changed', (event) => {
+      const isDragging = event.value === true
+      isDraggingTransform = isDragging
+      if (controls.value) controls.value.enabled = !isDragging
+      
+      if (!isDragging && pendingTransformUpdate) {
+        const update = pendingTransformUpdate
+        pendingTransformUpdate = null
+        setTimeout(() => {
+          sceneStore.updateSceneObjectData(update.id, { transform: update.transform })
+        }, 0)
+      }
+    })
+
+    transformControls.value.addEventListener('objectChange', () => {
+      if (!isDraggingTransform) return
+      const obj = transformControls.value?.object
+      const id = obj?.userData?.sceneObjectId
+      if (!obj || !id) return
+      pendingTransformUpdate = {
+        id,
+        transform: {
+          position: [obj.position.x, obj.position.y, obj.position.z],
+          rotation: [obj.rotation.x, obj.rotation.y, obj.rotation.z],
+          scale: [obj.scale.x, obj.scale.y, obj.scale.z]
+        }
+      }
+    })
+
+    // 添加 gizmo 到场景
+    const gizmo = transformControls.value.getHelper()
+    sceneStore.threeScene?.add(gizmo)
+
+    // 设置模式和空间
+    transformControls.value.setMode(sceneStore.transformMode)
+    transformControls.value.setSpace(sceneStore.transformSpace)
+
+    // 附加到选中的对象
+    attachTransformControl(sceneStore.selectedObjectId)
+  }
+
+  function updateControlsCamera() {
+    if (!camera.value) return
+    
+    if (controls.value) {
+      controls.value.object = camera.value
+      controls.value.update()
+    }
+    
+    if (transformControls.value) {
+      transformControls.value.camera = camera.value
+    }
+  }
+
+  // ==================== 渲染管理 ====================
 
   function resize() {
     if (!container.value || !sceneStore.renderer || !camera.value) return
@@ -92,18 +191,16 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
   }
 
   function start() {
-    if (!camera.value) ensureCamera()
-    if (!sceneStore.renderer || !sceneStore.threeScene || !camera.value) return
+    if (!sceneStore.renderer || !sceneStore.threeScene || !camera.value) {
+      console.warn('[useRenderer] start() 跳过：缺少必要组件')
+      return
+    }
     sceneStore.renderer.setAnimationLoop(() => {
       controls.value?.update()
       if (transformControls.value?.object && !isInSceneGraph(transformControls.value.object)) {
         transformControls.value.detach()
       }
-      // WebGPU 和 WebGL 都使用统一的渲染调用
-      // TransformControls 在拖动时会自动触发渲染，这里确保场景正常渲染
       sceneStore.renderer!.render(sceneStore.threeScene!, camera.value!)
-      
-      // 渲染完成后处理截图请求
       processScreenshot()
     })
   }
@@ -112,50 +209,224 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
     sceneStore.renderer?.setAnimationLoop(null as any)
   }
 
-  function dispose() {
-    console.log('dispose')
+  function applyRendererSettings() {
+    const renderer = sceneStore.renderer
+    if (!renderer) return
+    const settings = sceneStore.rendererSettings
+    const toneMappingMap: Record<string, number> = {
+      none: NoToneMapping,
+      linear: LinearToneMapping,
+      reinhard: ReinhardToneMapping,
+      cineon: CineonToneMapping,
+      acesFilmic: ACESFilmicToneMapping
+    }
+    const colorSpaceMap: Record<string, string> = {
+      srgb: SRGBColorSpace,
+      linear: LinearSRGBColorSpace
+    }
+    if (settings.toneMapping in toneMappingMap) {
+      renderer.toneMapping = toneMappingMap[settings.toneMapping] as ToneMapping
+    }
+    if (typeof settings.toneMappingExposure === 'number') {
+      renderer.toneMappingExposure = settings.toneMappingExposure
+    }
+    if (settings.outputColorSpace in colorSpaceMap) {
+      ;(renderer as any).outputColorSpace = colorSpaceMap[settings.outputColorSpace]
+    }
+    if ((renderer as any).isWebGLRenderer) {
+      ;(renderer as any).useLegacyLights = settings.useLegacyLights
+    }
+    if ((renderer as any).shadowMap) {
+      ;(renderer as any).shadowMap.enabled = settings.shadows
+    }
+    if ((renderer as any).shadowMap && (renderer as any).isWebGLRenderer) {
+      const shadowTypeMap: Record<string, number> = {
+        basic: BasicShadowMap,
+        pcf: PCFShadowMap,
+        pcfSoft: PCFSoftShadowMap,
+        vsm: VSMShadowMap
+      }
+      if (settings.shadowType in shadowTypeMap) {
+        ;(renderer as any).shadowMap.type = shadowTypeMap[settings.shadowType]
+      }
+    }
+  }
+
+  function createRenderer() {
+    if (!container.value) return
+
+    // 清理旧渲染器
+    if (sceneStore.renderer) {
+      try {
+        sceneStore.renderer.dispose()
+      } catch (e) { /* ignore */ }
+      const dom = sceneStore.renderer.domElement
+      dom?.parentElement?.removeChild(dom)
+      sceneStore.renderer = null
+    }
+
+    // 创建新渲染器
+    const antialias = opts.antialias ?? sceneStore.rendererSettings.antialias
+    if (sceneStore.rendererSettings.rendererType === 'webgl') {
+      sceneStore.renderer = new WebGLRenderer({ antialias })
+    } else {
+      sceneStore.renderer = new WebGPURenderer({ antialias })
+    }
+    container.value.appendChild(sceneStore.renderer.domElement)
+    applyRendererSettings()
+  }
+
+  // ==================== 场景切换（核心方法）====================
+
+  /**
+   * 切换到新场景（统一入口）
+   * 按正确顺序执行：停止渲染 → 清理 → 创建场景 → 同步对象 → 设置相机 → 设置控制器 → 开始渲染
+   */
+  function switchScene() {
+    console.log('[useRenderer] switchScene() 开始')
+    
+    // 1. 停止当前渲染
     stop()
-    const pendingTransform = detachTransformControls()
-    const pendingControls = controls.value
-    controls.value = null
-    // 渲染器的真正销毁交给 rebuildRenderer / 组件卸载统一处理
-    try {
-      pendingTransform?.dispose()
-    } catch (e) {
-      // ignore
+
+    // 2. 清理旧的 transformControls gizmo（但保留控制器实例）
+    if (transformControls.value && sceneStore.threeScene) {
+      const gizmo = transformControls.value.getHelper()
+      sceneStore.threeScene.remove(gizmo)
+      transformControls.value.detach()
     }
-    try {
-      pendingControls?.dispose()
-    } catch (e) {
-      // ignore
+
+    // 3. 创建新的 Three.js 场景
+    const scene = new Scene()
+    scene.background = new Color('#CFD8DC')
+    
+    // 4. 设置场景到 store（这会创建所有 three.js 对象并挂载）
+    sceneStore.setThreeScene(scene)
+
+    // 5. 从 store 中找到或创建相机
+    const cam = ensureCamera()
+    if (!cam) {
+      console.error('[useRenderer] 无法获取相机')
+      return
     }
-    // const dom = sceneStore.webGPURenderer?.domElement
+
+    // 6. 更新控制器的相机引用
+    updateControlsCamera()
+
+    // 7. 确保 transformControls 的 gizmo 在新场景中
+    if (transformControls.value && sceneStore.threeScene) {
+      const gizmo = transformControls.value.getHelper()
+      if (gizmo.parent !== sceneStore.threeScene) {
+        if (gizmo.parent) gizmo.parent.remove(gizmo)
+        sceneStore.threeScene.add(gizmo)
+      }
+      // 重新附加到选中对象
+      attachTransformControl(sceneStore.selectedObjectId)
+    }
+
+    // 8. 调整大小并开始渲染
+    resize()
+    start()
+
+    console.log('[useRenderer] switchScene() 完成')
+  }
+
+  // ==================== 初始化（首次挂载）====================
+
+  /**
+   * 初始化渲染环境（只在组件首次挂载时调用）
+   */
+  function init() {
+    if (isInitialized) {
+      console.warn('[useRenderer] 已初始化，跳过')
+      return
+    }
+    isInitialized = true
+    console.log('[useRenderer] init() 开始')
+
+    // 1. 添加事件监听器
+    container.value?.addEventListener('pointerup', handlePointerUp)
+    container.value?.addEventListener('pointerdown', handlePointerDown)
+    if (!keyboardListenerAdded) {
+      window.addEventListener('keydown', handleKeyDown)
+      keyboardListenerAdded = true
+    }
+    window.addEventListener('resize', resize)
+
+    // 2. 创建渲染器
+    createRenderer()
+
+    // 3. 创建初始场景
+    const scene = new Scene()
+    scene.background = new Color('#CFD8DC')
+    sceneStore.setThreeScene(scene)
+
+    // 4. 确保相机存在
+    ensureCamera()
+
+    // 5. 设置控制器
+    setupControls()
+
+    // 6. 调整大小并开始渲染
+    resize()
+    start()
+
+    console.log('[useRenderer] init() 完成')
+  }
+
+  // ==================== 清理 ====================
+
+  function dispose() {
+    console.log('[useRenderer] dispose()')
+    stop()
+    
+    // 清理 transformControls
+    if (transformControls.value) {
+      const gizmo = transformControls.value.getHelper()
+      sceneStore.threeScene?.remove(gizmo)
+      transformControls.value.dispose()
+      transformControls.value = null
+    }
+    
+    // 清理 controls
+    if (controls.value) {
+      controls.value.dispose()
+      controls.value = null
+    }
+    
+    // 移除事件监听器
     container.value?.removeEventListener('pointerdown', handlePointerDown)
     container.value?.removeEventListener('pointerup', handlePointerUp)
-    // 移除键盘事件监听器
     if (keyboardListenerAdded) {
       window.removeEventListener('keydown', handleKeyDown)
       keyboardListenerAdded = false
     }
+    window.removeEventListener('resize', resize)
     
-    sceneStore.renderer?.dispose()
-    sceneStore.renderer = null
+    // 清理渲染器
+    if (sceneStore.renderer) {
+      sceneStore.renderer.dispose()
+      const dom = sceneStore.renderer.domElement
+      dom?.parentElement?.removeChild(dom)
+      sceneStore.renderer = null
+    }
+    
+    // 清理场景数据
     sceneStore.threeScene = null
-
-    // 添加：清理场景数据
     sceneStore.objectsMap.clear()
     sceneStore.objectDataList = []
     sceneStore.selectedObjectId = null
-
+    
     camera.value = null
-    transformControls.value = null
-
-    useUiEditorStore().closeAssetPanel();
+    isInitialized = false
+    
+    useUiEditorStore().closeAssetPanel()
   }
+
+  // ==================== 交互逻辑 ====================
 
   let pendingAttachId: string | null = null
 
-  function isInSceneGraph(obj: Object3D) {
+  function isInSceneGraph(obj: Object3D): boolean {
     let current: Object3D | null = obj
     const scene = sceneStore.threeScene
     if (!scene) return false
@@ -212,7 +483,7 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
     raycaster.setFromCamera(pointer, camera.value)
     const objects = Array.from(sceneStore.objectsMap.values())
     const intersections = raycaster.intersectObjects(objects, true)
-    const getSceneObjectId = (obj: Object3D | null) => {
+    const getSceneObjectId = (obj: Object3D | null): string | null => {
       let current: Object3D | null = obj
       while (current) {
         const id = (current as any).userData?.sceneObjectId as string | undefined
@@ -268,7 +539,6 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
     
     if (event.key.toLowerCase() === 'z' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault()
-      // Ctrl/Cmd + Z 撤回，Ctrl/Cmd + Shift + Z 回退
       if (event.shiftKey) {
         sceneStore.redo()
       } else {
@@ -276,7 +546,6 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
       }
       return
     }
-    // Ctrl/Cmd + Y 回退（Windows 习惯）
     if (event.key.toLowerCase() === 'y' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault()
       sceneStore.redo()
@@ -312,30 +581,90 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
     }
   }
 
-  function initSceneBackground() {
-    container.value?.addEventListener('pointerup', handlePointerUp)
-    container.value?.addEventListener('pointerdown', handlePointerDown)
-    
-    // 确保键盘事件监听器只添加一次
-    if (!keyboardListenerAdded) {
-      window.addEventListener('keydown', handleKeyDown)
-      keyboardListenerAdded = true
-    }
-    
-    const scene = new Scene()
-    if (!sceneStore.threeScene) {
-      scene.background = new Color('#CFD8DC')
-    } else if (!sceneStore.threeScene.background) {
-      sceneStore.threeScene.background = new Color('#CFD8DC')
-    }
-    sceneStore.setThreeScene(scene)
+  // ==================== 截图 ====================
 
-    ensureCamera()
+  let pendingScreenshot: {
+    resolve: (blob: Blob) => void
+    reject: (error: Error) => void
+    width?: number
+    height?: number
+  } | null = null
 
-    rebuildRenderer()
-
-    window.addEventListener('resize', resize)
+  function captureScreenshot(width?: number, height?: number): Promise<Blob> {
+    return new Promise((resolve, reject) => {
+      if (!sceneStore.renderer || !sceneStore.threeScene || !camera.value) {
+        reject(new Error('渲染器未初始化'))
+        return
+      }
+      pendingScreenshot = { resolve, reject, width, height }
+    })
   }
+
+  function processScreenshot() {
+    if (!pendingScreenshot || !sceneStore.renderer || !camera.value) return
+    
+    const { resolve, reject, width, height } = pendingScreenshot
+    pendingScreenshot = null
+    
+    try {
+      const canvas = sceneStore.renderer.domElement as HTMLCanvasElement
+      if (!canvas) {
+        reject(new Error('Canvas 不存在'))
+        return
+      }
+      
+      const dataUrl = canvas.toDataURL('image/png')
+      
+      if (width && height && (width !== canvas.width || height !== canvas.height)) {
+        const img = new Image()
+        img.onload = () => {
+          const tempCanvas = document.createElement('canvas')
+          tempCanvas.width = width
+          tempCanvas.height = height
+          const ctx = tempCanvas.getContext('2d')
+          if (!ctx) {
+            reject(new Error('无法创建 2D 上下文'))
+            return
+          }
+          ctx.imageSmoothingEnabled = true
+          ctx.imageSmoothingQuality = 'high'
+          
+          const srcAspect = img.width / img.height
+          const dstAspect = width / height
+          let sx = 0, sy = 0, sw = img.width, sh = img.height
+          
+          if (srcAspect > dstAspect) {
+            sw = img.height * dstAspect
+            sx = (img.width - sw) / 2
+          } else if (srcAspect < dstAspect) {
+            sh = img.width / dstAspect
+            sy = (img.height - sh) / 2
+          }
+          
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, width, height)
+          tempCanvas.toBlob(
+            (blob) => {
+              if (blob) resolve(blob)
+              else reject(new Error('截图失败'))
+            },
+            'image/png',
+            1.0
+          )
+        }
+        img.onerror = () => reject(new Error('图片加载失败'))
+        img.src = dataUrl
+      } else {
+        fetch(dataUrl)
+          .then(res => res.blob())
+          .then(resolve)
+          .catch(reject)
+      }
+    } catch (error) {
+      reject(error as Error)
+    }
+  }
+
+  // ==================== Watchers ====================
 
   watch(() => sceneStore.selectedObjectId, (id) => {
     attachTransformControl(id)
@@ -358,272 +687,41 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
   }, { deep: true })
 
   watch(() => sceneStore.rendererSettings.rendererType, () => {
-    rebuildRenderer()
+    // 渲染器类型变化时需要重建
+    if (isInitialized) {
+      stop()
+      createRenderer()
+      setupControls()
+      resize()
+      start()
+    }
   })
 
-  function applyRendererSettings() {
-    const renderer = sceneStore.renderer
-    if (!renderer) return
-    const settings = sceneStore.rendererSettings
-    const toneMappingMap: Record<string, number> = {
-      none: NoToneMapping,
-      linear: LinearToneMapping,
-      reinhard: ReinhardToneMapping,
-      cineon: CineonToneMapping,
-      acesFilmic: ACESFilmicToneMapping
-    }
-    const colorSpaceMap: Record<string, string> = {
-      srgb: SRGBColorSpace,
-      linear: LinearSRGBColorSpace
-    }
-    if (settings.toneMapping in toneMappingMap) {
-      renderer.toneMapping = toneMappingMap[settings.toneMapping] as ToneMapping
-    }
-    if (typeof settings.toneMappingExposure === 'number') {
-      renderer.toneMappingExposure = settings.toneMappingExposure
-    }
-    if (settings.outputColorSpace in colorSpaceMap) {
-      ;(renderer as any).outputColorSpace = colorSpaceMap[settings.outputColorSpace]
-    }
-    if ((renderer as any).isWebGLRenderer) {
-      ;(renderer as any).useLegacyLights = settings.useLegacyLights
-    }
-    if ((renderer as any).shadowMap) {
-      ;(renderer as any).shadowMap.enabled = settings.shadows
-    }
-    if ((renderer as any).shadowMap && (renderer as any).isWebGLRenderer) {
-      const shadowTypeMap: Record<string, number> = {
-        basic: BasicShadowMap,
-        pcf: PCFShadowMap,
-        pcfSoft: PCFSoftShadowMap,
-        vsm: VSMShadowMap
-      }
-      if (settings.shadowType in shadowTypeMap) {
-        ;(renderer as any).shadowMap.type = shadowTypeMap[settings.shadowType]
-      }
-    }
-  }
-
-  function rebuildRenderer() {
-    stop()
-    const pendingTransform = detachTransformControls()
-    const pendingControls = controls.value
-    controls.value = null
-    if (sceneStore.renderer) {
-      try {
-        sceneStore.renderer.dispose()
-      } catch (e) {
-        // ignore
-      }
-      const dom = sceneStore.renderer.domElement
-      dom?.parentElement?.removeChild(dom)
-      sceneStore.renderer = null
-    }
-    try {
-      pendingTransform?.dispose()
-    } catch (e) {
-      // ignore
-    }
-    try {
-      pendingControls?.dispose()
-    } catch (e) {
-      // ignore
-    }
-
-    if (!container.value) return
-    const antialias = opts.antialias ?? sceneStore.rendererSettings.antialias
-    if (sceneStore.rendererSettings.rendererType === 'webgl') {
-      sceneStore.renderer = new WebGLRenderer({ antialias })
-    } else {
-      sceneStore.renderer = new WebGPURenderer({ antialias })
-    }
-    container.value.appendChild(sceneStore.renderer.domElement)
-
-    if (camera.value) {
-      controls.value = new MapControls(camera.value, container.value)
-
-      transformControls.value = new TransformControls(camera.value, sceneStore.renderer.domElement)
-      transformControls.value.addEventListener('dragging-changed', (event) => {
-        const isDragging = event.value === true
-        isDraggingTransform = isDragging
-        if (controls.value) controls.value.enabled = !isDragging
-        
-        // 拖动结束时，提交最终的 transform 更新到 store
-        // 使用 setTimeout 异步执行，避免阻塞主线程导致 INP 延迟
-        if (!isDragging && pendingTransformUpdate) {
-          const update = pendingTransformUpdate
-          pendingTransformUpdate = null
-          // 异步执行，避免阻塞交互响应
-          setTimeout(() => {
-            // 如果使用命令模式，updateSceneObjectData 会自动创建命令
-            // 如果使用旧的快照模式，这里会跳过快照（保持原有行为）
-            sceneStore.updateSceneObjectData(update.id, {
-              transform: update.transform
-            })
-          }, 0)
-        }
-      })
-      // 拖动过程中只缓存 transform，不立即更新 store（避免频繁 store 更新导致卡顿）
-      // 拖动结束时通过 dragging-changed 事件提交最终状态
-      transformControls.value.addEventListener('objectChange', () => {
-        if (!isDraggingTransform) return // 非拖动状态才立即更新（理论上不会触发，但保险起见）
-        
-        const obj = transformControls.value?.object
-        const id = obj?.userData?.sceneObjectId
-        if (!obj || !id) return
-        
-        // 拖动时只缓存，不更新 store（避免 WebGPU 下频繁 store 更新导致卡顿）
-        pendingTransformUpdate = {
-          id,
-          transform: {
-            position: [obj.position.x, obj.position.y, obj.position.z],
-            rotation: [obj.rotation.x, obj.rotation.y, obj.rotation.z],
-            scale: [obj.scale.x, obj.scale.y, obj.scale.z]
-          }
-        }
-      })
-
-      const gizmo = transformControls.value.getHelper()
-      sceneStore.threeScene?.add(gizmo)
-      attachTransformControl(sceneStore.selectedObjectId)
-      transformControls.value.setMode(sceneStore.transformMode)
-      transformControls.value.setSpace(sceneStore.transformSpace)
-    }
-    applyRendererSettings()
-    resize()
-    start()
-  }
-
-  function detachTransformControls() {
-    if (!transformControls.value) return null
-    const helper = transformControls.value.getHelper()
-    sceneStore.threeScene?.remove(helper)
-    transformControls.value.detach()
-    const pending = transformControls.value
-    transformControls.value = null
-    return pending
-  }
-
-  // 截图相关
-  let pendingScreenshot: {
-    resolve: (blob: Blob) => void
-    reject: (error: Error) => void
-    width?: number
-    height?: number
-  } | null = null
-
-  /**
-   * 截取当前场景截图
-   * 在渲染循环中截图，确保使用正确的摄像机和时机
-   */
-  function captureScreenshot(width?: number, height?: number): Promise<Blob> {
-    return new Promise((resolve, reject) => {
-      if (!sceneStore.renderer || !sceneStore.threeScene || !camera.value) {
-        reject(new Error('渲染器未初始化'))
-        return
-      }
-      
-      // 设置待处理的截图请求
-      pendingScreenshot = { resolve, reject, width, height }
-    })
-  }
-
-  /**
-   * 处理截图（在渲染循环中调用）
-   */
-  function processScreenshot() {
-    if (!pendingScreenshot || !sceneStore.renderer || !camera.value) return
-    
-    const { resolve, reject, width, height } = pendingScreenshot
-    pendingScreenshot = null
-    
-    try {
-      const canvas = sceneStore.renderer.domElement as HTMLCanvasElement
-      if (!canvas) {
-        reject(new Error('Canvas 不存在'))
-        return
-      }
-      
-      // 同步获取 canvas 内容
-      const dataUrl = canvas.toDataURL('image/png')
-      
-      // 如果需要缩放
-      if (width && height && (width !== canvas.width || height !== canvas.height)) {
-        const img = new Image()
-        img.onload = () => {
-          const tempCanvas = document.createElement('canvas')
-          tempCanvas.width = width
-          tempCanvas.height = height
-          const ctx = tempCanvas.getContext('2d')
-          if (!ctx) {
-            reject(new Error('无法创建 2D 上下文'))
-            return
-          }
-          ctx.imageSmoothingEnabled = true
-          ctx.imageSmoothingQuality = 'high'
-          
-          // 使用 cover 模式：保持宽高比，裁剪多余部分填满目标区域
-          const srcAspect = img.width / img.height
-          const dstAspect = width / height
-          let sx = 0, sy = 0, sw = img.width, sh = img.height
-          
-          if (srcAspect > dstAspect) {
-            // 原图更宽，裁剪左右两侧
-            sw = img.height * dstAspect
-            sx = (img.width - sw) / 2
-          } else if (srcAspect < dstAspect) {
-            // 原图更高，裁剪上下两侧
-            sh = img.width / dstAspect
-            sy = (img.height - sh) / 2
-          }
-          
-          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, width, height)
-          tempCanvas.toBlob(
-            (blob) => {
-              if (blob) {
-                resolve(blob)
-              } else {
-                reject(new Error('截图失败'))
-              }
-            },
-            'image/png',
-            1.0
-          )
-        }
-        img.onerror = () => reject(new Error('图片加载失败'))
-        img.src = dataUrl
-      } else {
-        // 不需要缩放，直接转换
-        fetch(dataUrl)
-          .then(res => res.blob())
-          .then(resolve)
-          .catch(reject)
-      }
-    } catch (error) {
-      reject(error as Error)
-    }
-  }
+  // ==================== 生命周期 ====================
 
   onBeforeUnmount(() => {
-    console.log('onBeforeUnmount')
-    window.removeEventListener('resize', resize)
-    if (keyboardListenerAdded) {
-      window.removeEventListener('keydown', handleKeyDown)
-      keyboardListenerAdded = false
-    }
+    console.log('[useRenderer] onBeforeUnmount')
     dispose()
   })
 
   return {
-    initSceneBackground,
+    // 核心方法
+    init,
+    switchScene,
+    dispose,
+    
+    // 状态
     container,
     camera,
     controls,
     transformControls,
+    
+    // 渲染控制
     start,
     stop,
     resize,
-    dispose,
+    
+    // 截图
     captureScreenshot
   }
 }
