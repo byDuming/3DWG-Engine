@@ -1,5 +1,5 @@
-export type AssetType = 'model' | 'texture' | 'image' | 'material' | 'hdri'
-export type AssetSource = 'local' | 'remote'
+export type AssetType = 'model' | 'texture' | 'image' | 'material' | 'hdri' | 'audio' | 'video' | 'other'
+export type AssetSource = 'local' | 'remote' | 'cloud'
 
 export type AssetRef = {
   id: string
@@ -8,6 +8,9 @@ export type AssetRef = {
   name: string
   source: AssetSource
   thumbnail?: string // 预览图 URL
+  size?: number // 文件大小
+  mimeType?: string // MIME 类型
+  cloudId?: string // 云端资产ID
   meta?: {
     ext?: string
     size?: number

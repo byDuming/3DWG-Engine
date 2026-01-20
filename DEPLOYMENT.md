@@ -8,8 +8,8 @@
 - **文件**：`src/route/index.ts`
 
 ### 2. ✅ Base Path 配置
-- **已配置**：`vite.config.ts` 中设置了 `base: '/3DWG-Engine/'`
-- **注意**：如果仓库名称不是 `3DWG-Engine`，需要修改此配置
+- **已配置**：`vite.config.ts` 中设置了 `base: '/ThreeJS-Editor/'`
+- **注意**：如果仓库名称不是 `ThreeJS-Editor`，需要修改此配置
 
 ### 3. ✅ GitHub Actions 工作流
 - **已配置**：`.github/workflows/static.yml`
@@ -24,7 +24,7 @@
 
 1. **检查仓库名称**
    - 确认 GitHub 仓库名称
-   - 如果名称不是 `3DWG-Engine`，修改 `vite.config.ts` 中的 `base` 配置
+   - 如果名称不是 `ThreeJS-Editor`，修改 `vite.config.ts` 中的 `base` 配置
 
 2. **配置环境变量**（本地开发）
    - 在项目根目录创建 `.env` 文件（如果不存在）
@@ -69,7 +69,7 @@
 
 3. **等待部署完成**
    - 构建完成后，GitHub Pages 会自动部署
-   - 部署完成后，访问：`https://你的用户名.github.io/3DWG-Engine/`
+   - 部署完成后，访问：`https://你的用户名.github.io/ThreeJS-Editor/`
 
 ## 常见问题
 

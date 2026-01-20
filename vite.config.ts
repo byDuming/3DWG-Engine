@@ -8,7 +8,7 @@ import Components from 'unplugin-vue-components/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/3DWG-Engine/',   // GitHub Pages 仓库名称
+  base: '/ThreeJS-Editor/',   // GitHub Pages 仓库名称
   build: { 
     outDir: 'dist',
     // 确保构建产物正确

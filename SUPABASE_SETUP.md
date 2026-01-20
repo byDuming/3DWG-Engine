@@ -5,7 +5,7 @@
 1. 访问 [Supabase](https://supabase.com) 并注册/登录
 2. 点击 "New Project" 创建新项目
 3. 填写项目信息：
-   - **Name**: 3DWG-Engine（或你喜欢的名称）
+   - **Name**: ThreeJS-Editor（或你喜欢的名称）
    - **Database Password**: 设置一个强密码（请保存好）
    - **Region**: 选择离你最近的区域（建议选择亚洲区域）
 4. 等待项目创建完成（约 2 分钟）

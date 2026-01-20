@@ -12,10 +12,14 @@
     CubeOutline,
     ImagesOutline,
     ColorPaletteOutline,
-    SunnyOutline
+    SunnyOutline,
+    PlayOutline,
+    FolderOutline
   } from '@vicons/ionicons5'
   import { DeleteFilled } from '@vicons/material'
   import type { AssetRef } from '@/types/asset'
+  // 时间轴组件
+  import { Timeline } from '@/components/timeline'
 
   const sceneStore = useSceneStore()
   const uiEditorStore = useUiEditorStore()
@@ -236,13 +240,28 @@
     <!-- 标题栏 -->
     <div class="panel-header" @click="uiEditorStore.toggleAssetPanel">
       <div class="header-left">
-        <n-icon size="18">
-          <component :is="currentCategory.icon" />
-        </n-icon>
-        <span class="title">资产管理</span>
-        <n-tag v-if="filteredAssets.length > 0" size="small" :bordered="false">
-          {{ filteredAssets.length }}
-        </n-tag>
+        <!-- 模式切换标签 -->
+        <div class="mode-tabs" @click.stop>
+          <div 
+            class="mode-tab" 
+            :class="{ active: uiEditorStore.bottomPanelMode === 'assets' }"
+            @click="uiEditorStore.setBottomPanelMode('assets')"
+          >
+            <n-icon size="16"><FolderOutline /></n-icon>
+            <span>资产管理</span>
+            <n-tag v-if="filteredAssets.length > 0 && uiEditorStore.bottomPanelMode === 'assets'" size="small" :bordered="false">
+              {{ filteredAssets.length }}
+            </n-tag>
+          </div>
+          <div 
+            class="mode-tab" 
+            :class="{ active: uiEditorStore.bottomPanelMode === 'timeline' }"
+            @click="uiEditorStore.setBottomPanelMode('timeline')"
+          >
+            <n-icon size="16"><PlayOutline /></n-icon>
+            <span>时间轴</span>
+          </div>
+        </div>
       </div>
       <div class="header-right">
         <n-icon size="18">
@@ -254,124 +273,130 @@
 
     <!-- 面板内容 -->
     <div v-show="uiEditorStore.isAssetPanelOpen" class="panel-content">
-      <!-- 左侧类别导航 -->
-      <div class="category-nav">
-        <n-tooltip
-          v-for="cat in categories"
-          :key="cat.key"
-          trigger="hover"
-          placement="right"
-        >
-          <template #trigger>
-            <div
-              class="category-item"
-              :class="{ active: uiEditorStore.activeAssetCategory === cat.key }"
-              @click="uiEditorStore.setAssetCategory(cat.key)"
-            >
-              <n-icon size="20">
-                <component :is="cat.icon" />
-              </n-icon>
-            </div>
-          </template>
-          {{ cat.label }}
-        </n-tooltip>
-      </div>
-
-      <!-- 右侧内容区 -->
-      <div class="asset-content">
-        <!-- 工具栏 -->
-        <div class="toolbar">
-          <div class="toolbar-left">
-            <span class="category-label">{{ currentCategory.label }}</span>
-          </div>
-          <div class="toolbar-right">
-            <!-- 本地导入（仅模型） -->
-            <n-upload
-              v-if="currentCategory.key === 'model'"
-              :default-upload="false"
-              :show-file-list="false"
-              :accept="currentCategory.accept"
-              @update:file-list="handleLocalModelImport"
-            >
-              <n-button size="small" quaternary>
-                <template #icon>
-                  <n-icon><AddOutline /></n-icon>
-                </template>
-                本地导入
-              </n-button>
-            </n-upload>
-            <!-- 云端上传 -->
-            <n-upload
-              :default-upload="false"
-              :show-file-list="false"
-              :accept="currentCategory.accept"
-              :file-list="modelUploadList"
-              @update:file-list="handleAssetUpload"
-              :disabled="uploading || !assetApi.isStorageAvailable()"
-            >
-              <n-button size="small" type="primary" :loading="uploading">
-                <template #icon>
-                  <n-icon><CloudUploadOutline /></n-icon>
-                </template>
-                上传
-              </n-button>
-            </n-upload>
-          </div>
+      <!-- 时间轴模式 -->
+      <Timeline v-if="uiEditorStore.bottomPanelMode === 'timeline'" class="timeline-wrapper" />
+      
+      <!-- 资产管理模式 -->
+      <div v-else class="assets-mode">
+        <!-- 左侧类别导航 -->
+        <div class="category-nav">
+          <n-tooltip
+            v-for="cat in categories"
+            :key="cat.key"
+            trigger="hover"
+            placement="right"
+          >
+            <template #trigger>
+              <div
+                class="category-item"
+                :class="{ active: uiEditorStore.activeAssetCategory === cat.key }"
+                @click="uiEditorStore.setAssetCategory(cat.key)"
+              >
+                <n-icon size="20">
+                  <component :is="cat.icon" />
+                </n-icon>
+              </div>
+            </template>
+            {{ cat.label }}
+          </n-tooltip>
         </div>
 
-        <!-- 资产列表 -->
-        <div class="asset-list">
-          <n-spin :show="loading">
-            <n-scrollbar v-if="filteredAssets.length > 0" style="max-height: calc(100% - 8px);">
-              <div class="asset-grid">
-                <div
-                  v-for="asset in filteredAssets"
-                  :key="asset.id"
-                  class="asset-item"
-                  @click="handleImportAsset(asset)"
-                >
-                  <!-- 预览图 -->
-                  <div class="asset-preview">
-                    <img
-                      v-if="asset.thumbnail"
-                      :src="asset.thumbnail"
-                      :alt="asset.name"
-                    />
-                    <n-icon v-else size="32" color="#1d1d1d">
-                      <component :is="currentCategory.icon" />
-                    </n-icon>
-                    <!-- 悬停操作 -->
-                    <div class="asset-overlay">
-                      <n-button size="tiny" type="primary" @click.stop="handleImportAsset(asset)">
-                        导入
-                      </n-button>
-                      <n-button size="tiny" type="error" @click.stop="handleDeleteAsset(asset)">
-                        <template #icon>
-                          <n-icon><DeleteFilled /></n-icon>
-                        </template>
-                      </n-button>
-                    </div>
-                  </div>
-                  <!-- 名称 -->
-                  <div class="asset-name">
-                    <n-ellipsis :line-clamp="1" :tooltip="{ placement: 'top' }">
-                      {{ asset.name }}
-                    </n-ellipsis>
-                  </div>
-                  <div class="asset-size">{{ formatFileSize(asset.meta?.size) }}</div>
-                </div>
-              </div>
-            </n-scrollbar>
-
-            <!-- 空状态 -->
-            <div v-else class="empty-state">
-              <n-icon size="40" color="#666">
-                <component :is="currentCategory.icon" />
-              </n-icon>
-              <div class="empty-text">暂无{{ currentCategory.label }}</div>
-              <div class="empty-hint">{{ currentCategory.description }}</div>
+        <!-- 右侧内容区 -->
+        <div class="asset-content">
+          <!-- 工具栏 -->
+          <div class="toolbar">
+            <div class="toolbar-left">
+              <span class="category-label">{{ currentCategory.label }}</span>
             </div>
-          </n-spin>
+            <div class="toolbar-right">
+              <!-- 本地导入（仅模型） -->
+              <n-upload
+                v-if="currentCategory.key === 'model'"
+                :default-upload="false"
+                :show-file-list="false"
+                :accept="currentCategory.accept"
+                @update:file-list="handleLocalModelImport"
+              >
+                <n-button size="small" quaternary>
+                  <template #icon>
+                    <n-icon><AddOutline /></n-icon>
+                  </template>
+                  本地导入
+                </n-button>
+              </n-upload>
+              <!-- 云端上传 -->
+              <n-upload
+                :default-upload="false"
+                :show-file-list="false"
+                :accept="currentCategory.accept"
+                :file-list="modelUploadList"
+                @update:file-list="handleAssetUpload"
+                :disabled="uploading || !assetApi.isStorageAvailable()"
+              >
+                <n-button size="small" type="primary" :loading="uploading">
+                  <template #icon>
+                    <n-icon><CloudUploadOutline /></n-icon>
+                  </template>
+                  上传
+                </n-button>
+              </n-upload>
+            </div>
+          </div>
+
+          <!-- 资产列表 -->
+          <div class="asset-list">
+            <n-spin :show="loading">
+              <n-scrollbar v-if="filteredAssets.length > 0" style="max-height: calc(100% - 8px);">
+                <div class="asset-grid">
+                  <div
+                    v-for="asset in filteredAssets"
+                    :key="asset.id"
+                    class="asset-item"
+                    @click="handleImportAsset(asset)"
+                  >
+                    <!-- 预览图 -->
+                    <div class="asset-preview">
+                      <img
+                        v-if="asset.thumbnail"
+                        :src="asset.thumbnail"
+                        :alt="asset.name"
+                      />
+                      <n-icon v-else size="32" color="#1d1d1d">
+                        <component :is="currentCategory.icon" />
+                      </n-icon>
+                      <!-- 悬停操作 -->
+                      <div class="asset-overlay">
+                        <n-button size="tiny" type="primary" @click.stop="handleImportAsset(asset)">
+                          导入
+                        </n-button>
+                        <n-button size="tiny" type="error" @click.stop="handleDeleteAsset(asset)">
+                          <template #icon>
+                            <n-icon><DeleteFilled /></n-icon>
+                          </template>
+                        </n-button>
+                      </div>
+                    </div>
+                    <!-- 名称 -->
+                    <div class="asset-name">
+                      <n-ellipsis :line-clamp="1" :tooltip="{ placement: 'top' }">
+                        {{ asset.name }}
+                      </n-ellipsis>
+                    </div>
+                    <div class="asset-size">{{ formatFileSize(asset.meta?.size) }}</div>
+                  </div>
+                </div>
+              </n-scrollbar>
+
+              <!-- 空状态 -->
+              <div v-else class="empty-state">
+                <n-icon size="40" color="#666">
+                  <component :is="currentCategory.icon" />
+                </n-icon>
+                <div class="empty-text">暂无{{ currentCategory.label }}</div>
+                <div class="empty-hint">{{ currentCategory.description }}</div>
+              </div>
+            </n-spin>
+          </div>
         </div>
       </div>
     </div>
@@ -409,25 +434,48 @@
   align-items: center;
   justify-content: space-between;
   cursor: pointer;
-  /* background: #252525; */
   user-select: none;
   flex-shrink: 0;
 }
 
 .panel-header:hover {
-  /* background: #2a2a2a; */
+  background: rgba(0, 0, 0, 0.03);
 }
 
 .header-left {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1;
 }
 
-.title {
+.mode-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mode-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
   font-size: 13px;
   font-weight: 500;
+  color: #666;
+  cursor: pointer;
+  border-radius: 6px 6px 0 0;
+  transition: all 0.15s;
+}
+
+.mode-tab:hover {
   color: #1d1d1d;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.mode-tab.active {
+  color: #409eff;
+  background: rgba(64, 158, 255, 0.1);
 }
 
 .header-right {
@@ -435,6 +483,17 @@
 }
 
 .panel-content {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.timeline-wrapper {
+  flex: 1;
+  overflow: hidden;
+}
+
+.assets-mode {
   flex: 1;
   display: flex;
   overflow: hidden;

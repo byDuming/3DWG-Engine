@@ -1,5 +1,5 @@
 <script setup lang="ts">
-  import { onMounted, watch } from 'vue'
+  import { onMounted, watch, watchEffect } from 'vue'
   import { useRenderer } from '@/composables/useRenderer'
   import { useSceneStore } from '@/stores/modules/useScene.store'
   import { sceneApi } from '@/services/sceneApi'
@@ -18,6 +18,7 @@
 
   const props = defineProps<{
     sceneId?: number | null
+    mode?: 'preview' | 'edit'  // 预览模式 or 编辑模式
   }>()
 
   const sceneStore = useSceneStore()
@@ -27,6 +28,11 @@
   // container 在模板中使用 ref="container"
   // @ts-ignore - Vue 模板中的 ref 绑定
   void container
+
+  // 同步 mode prop 到 sceneStore.isEditMode
+  watchEffect(() => {
+    sceneStore.isEditMode = props.mode !== 'preview'
+  })
 
   /**
    * 加载场景数据到 store（不涉及 three.js 层）
@@ -56,6 +62,14 @@
       sceneStore.assets = (sceneData.assets ?? []) as any[]
       sceneStore.objectDataList = sceneData.objectDataList ?? []
 
+      // 加载动画数据
+      if (sceneData.animationData) {
+        const { useAnimationStore } = await import('@/stores/modules/useAnimation.store')
+        const animationStore = useAnimationStore()
+        animationStore.setAnimationData(sceneData.animationData)
+        console.log('[Scene] 已加载动画数据，剪辑数:', sceneData.animationData.clips?.length ?? 0)
+      }
+
       // 清空历史栈
       sceneStore.historyManager.clear()
       sceneStore.isSceneReady = true
@@ -78,6 +92,11 @@
     sceneStore.objectDataList = []
     sceneStore.selectedObjectId = null
     sceneStore.currentSceneId = null
+
+    // 清理动画数据
+    const { useAnimationStore } = await import('@/stores/modules/useAnimation.store')
+    const animationStore = useAnimationStore()
+    animationStore.setAnimationData(null)
 
     // 从本地数据库加载默认场景
     await sceneStore.initScene()

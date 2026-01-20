@@ -2,6 +2,7 @@ import { supabase, TABLES } from './supabase'
 import type { SceneRow } from './db'
 import type { SceneObjectData } from '@/interfaces/sceneInterface'
 import type { AssetRef } from '@/types/asset'
+import type { AnimationStorageData } from '@/types/animation'
 
 /**
  * 云数据库场景数据表结构
@@ -15,6 +16,7 @@ export interface CloudSceneRow {
   object_data_list: SceneObjectData[] | string // JSON 字符串或对象
   assets: AssetRef[] | string // JSON 字符串或对象
   renderer_settings: Record<string, unknown> | string // JSON 字符串或对象
+  animation_data?: AnimationStorageData | string | null // 动画数据（JSON 字符串或对象）
   thumbnail?: string
   updated_at: string
   created_at: string
@@ -38,6 +40,11 @@ function localToCloud(local: SceneRow, userId?: string): Omit<CloudSceneRow, 'id
     renderer_settings: typeof local.rendererSettings === 'string'
       ? local.rendererSettings
       : JSON.stringify(local.rendererSettings || {}),
+    animation_data: local.animationData
+      ? (typeof local.animationData === 'string'
+        ? local.animationData
+        : JSON.stringify(local.animationData))
+      : null,
     thumbnail: local.thumbnail,
     updated_at: local.updatedAt instanceof Date 
       ? local.updatedAt.toISOString() 
@@ -63,6 +70,12 @@ function cloudToLocal(cloud: CloudSceneRow): SceneRow {
   const rendererSettings = typeof cloud.renderer_settings === 'string'
     ? JSON.parse(cloud.renderer_settings)
     : cloud.renderer_settings ?? {}
+  
+  const animationData = cloud.animation_data
+    ? (typeof cloud.animation_data === 'string'
+      ? JSON.parse(cloud.animation_data)
+      : cloud.animation_data)
+    : undefined
 
   return {
     id: cloud.id,
@@ -72,6 +85,7 @@ function cloudToLocal(cloud: CloudSceneRow): SceneRow {
     objectDataList,
     assets,
     rendererSettings,
+    animationData,
     thumbnail: cloud.thumbnail,
     updatedAt: new Date(cloud.updated_at),
     createdAt: new Date(cloud.created_at)

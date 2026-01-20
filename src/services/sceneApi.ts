@@ -1,5 +1,6 @@
 import type { SceneObjectData } from '@/interfaces/sceneInterface'
 import type { AssetRef } from '@/types/asset'
+import type { AnimationStorageData } from '@/types/animation'
 import { getDB, initDB, type SceneRow } from './db'
 import { cloudSync } from './cloudSync'
 
@@ -23,6 +24,7 @@ export interface CreateSceneParams {
   objectDataList?: SceneObjectData[]
   assets?: AssetRef[]
   rendererSettings?: Record<string, unknown>
+  animationData?: AnimationStorageData
 }
 
 /**
@@ -36,6 +38,7 @@ export interface UpdateSceneParams {
   objectDataList?: SceneObjectData[]
   assets?: AssetRef[]
   rendererSettings?: Record<string, unknown>
+  animationData?: AnimationStorageData
   thumbnail?: string
 }
 
@@ -171,12 +174,17 @@ export class SceneApi {
       typeof row.rendererSettings === 'string'
         ? JSON.parse(row.rendererSettings)
         : row.rendererSettings
+    const animationData =
+      typeof row.animationData === 'string'
+        ? JSON.parse(row.animationData)
+        : row.animationData ?? null
 
     return {
       ...row,
       objectDataList,
       assets,
-      rendererSettings
+      rendererSettings,
+      animationData
     } as SceneRow
   }
 
@@ -201,6 +209,7 @@ export class SceneApi {
             row.objectDataList = JSON.stringify(scene.objectDataList)
             row.assets = JSON.stringify(scene.assets || [])
             row.rendererSettings = JSON.stringify(scene.rendererSettings || {})
+            row.animationData = JSON.stringify(scene.animationData || null)
             row.thumbnail = scene.thumbnail
             row.updatedAt = scene.updatedAt
             row.createdAt = scene.createdAt
@@ -218,6 +227,7 @@ export class SceneApi {
             objectDataList: JSON.stringify(scene.objectDataList),
             assets: JSON.stringify(scene.assets || []),
             rendererSettings: JSON.stringify(scene.rendererSettings || {}),
+            animationData: JSON.stringify(scene.animationData || null),
             thumbnail: scene.thumbnail,
             updatedAt: scene.updatedAt,
             createdAt: scene.createdAt
@@ -349,6 +359,12 @@ export class SceneApi {
               ? JSON.parse(cloudScene.renderer_settings)
               : cloudScene.renderer_settings ?? {}
 
+          const animationData = cloudScene.animation_data
+            ? (typeof cloudScene.animation_data === 'string'
+              ? JSON.parse(cloudScene.animation_data)
+              : cloudScene.animation_data)
+            : undefined
+
           const result: SceneRow = {
             id: cloudScene.id,
             name: cloudScene.name,
@@ -357,6 +373,7 @@ export class SceneApi {
             objectDataList,
             assets,
             rendererSettings,
+            animationData,
             thumbnail: cloudScene.thumbnail,
             updatedAt: new Date(cloudScene.updated_at),
             createdAt: new Date(cloudScene.created_at)
@@ -425,6 +442,7 @@ export class SceneApi {
       objectDataList: params.objectDataList ?? currentScene.objectDataList,
       assets: params.assets ?? currentScene.assets,
       rendererSettings: params.rendererSettings ?? currentScene.rendererSettings,
+      animationData: params.animationData ?? currentScene.animationData,
       thumbnail: params.thumbnail !== undefined ? params.thumbnail : currentScene.thumbnail,
       updatedAt: new Date()
     }
@@ -447,6 +465,11 @@ export class SceneApi {
             typeof cloudScene.renderer_settings === 'string'
               ? JSON.parse(cloudScene.renderer_settings)
               : cloudScene.renderer_settings ?? {}
+          const animationData = cloudScene.animation_data
+            ? (typeof cloudScene.animation_data === 'string'
+              ? JSON.parse(cloudScene.animation_data)
+              : cloudScene.animation_data)
+            : undefined
 
           const result: SceneRow = {
             id: cloudScene.id,
@@ -456,6 +479,7 @@ export class SceneApi {
             objectDataList,
             assets,
             rendererSettings,
+            animationData,
             thumbnail: cloudScene.thumbnail,
             updatedAt: new Date(cloudScene.updated_at),
             createdAt: new Date(cloudScene.created_at)
@@ -485,6 +509,7 @@ export class SceneApi {
         row.objectDataList = JSON.stringify(updatedScene.objectDataList)
         row.assets = JSON.stringify(updatedScene.assets || [])
         row.rendererSettings = JSON.stringify(updatedScene.rendererSettings || {})
+        row.animationData = JSON.stringify(updatedScene.animationData || null)
         row.thumbnail = updatedScene.thumbnail
         row.updatedAt = updatedScene.updatedAt
         return row
@@ -507,6 +532,7 @@ export class SceneApi {
     objectDataList: SceneObjectData[]
     assets: AssetRef[]
     rendererSettings: Record<string, unknown>
+    animationData?: AnimationStorageData
     thumbnail?: string
   }): Promise<SceneRow | null> {
     return this.updateScene({
@@ -517,6 +543,7 @@ export class SceneApi {
       objectDataList: sceneData.objectDataList,
       assets: sceneData.assets,
       rendererSettings: sceneData.rendererSettings,
+      animationData: sceneData.animationData,
       thumbnail: sceneData.thumbnail
     })
   }

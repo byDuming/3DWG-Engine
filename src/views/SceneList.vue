@@ -88,9 +88,14 @@ async function handleDeleteScene(id: number, name: string, event: Event) {
   })
 }
 
-// 跳转到编辑页面
+// 跳转到预览页面（点击卡片）
+function handlePreviewScene(id: number) {
+  router.push(`/engine?sceneId=${id}&mode=preview`)
+}
+
+// 跳转到编辑页面（点击编辑按钮）
 function handleEditScene(id: number) {
-  router.push(`/engine?sceneId=${id}`)
+  router.push(`/engine?sceneId=${id}&mode=edit`)
 }
 
 // 格式化日期
@@ -127,7 +132,7 @@ onMounted(() => {
             :title="scene.name" 
             class="card"
             hoverable
-            @click="handleEditScene(scene.id)"
+            @click="handlePreviewScene(scene.id)"
             style="cursor: pointer;"
           >
             <template #cover>

@@ -1,5 +1,6 @@
 import type { SceneObjectData } from '@/interfaces/sceneInterface'
 import type { AssetRef } from '@/types/asset'
+import type { AnimationStorageData } from '@/types/animation'
 import { init, getInstance } from 'ts-indexdb'
 
 export type SceneRow = {
@@ -10,6 +11,7 @@ export type SceneRow = {
   objectDataList: SceneObjectData[]
   assets?: AssetRef[]
   rendererSettings?: Record<string, unknown>
+  animationData?: AnimationStorageData // 动画数据
   thumbnail?: string // 缩略图 URL
   updatedAt: Date
   createdAt: Date
@@ -17,7 +19,7 @@ export type SceneRow = {
 
 export async function initDB(): Promise<{ inst: ReturnType<typeof getInstance>; sceneData: SceneRow }> {
   await init({
-    dbName: '3dwg-engine-db',
+    dbName: 'threejs-editor-db',
     version: 1,
     tables: [
       {
@@ -150,8 +152,14 @@ export async function initDB(): Promise<{ inst: ReturnType<typeof getInstance>; 
     typeof first.rendererSettings === 'string'
       ? JSON.parse(first.rendererSettings)
       : first.rendererSettings
+  const animationData =
+    first.animationData
+      ? (typeof first.animationData === 'string'
+        ? JSON.parse(first.animationData)
+        : first.animationData)
+      : undefined
 
-  return { inst, sceneData: { ...first, objectDataList, assets, rendererSettings } }
+  return { inst, sceneData: { ...first, objectDataList, assets, rendererSettings, animationData } }
 }
 
 export function getDB() {

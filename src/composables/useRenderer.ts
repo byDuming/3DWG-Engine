@@ -45,6 +45,7 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
   let pendingTransformUpdate: { id: string; transform: { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] } } | null = null
   let keyboardListenerAdded = false
   let isInitialized = false
+  let resizeObserver: ResizeObserver | null = null
 
   // ==================== 相机管理 ====================
 
@@ -351,6 +352,14 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
       keyboardListenerAdded = true
     }
     window.addEventListener('resize', resize)
+    
+    // 使用 ResizeObserver 监听容器大小变化（处理布局变化）
+    if (container.value) {
+      resizeObserver = new ResizeObserver(() => {
+        resize()
+      })
+      resizeObserver.observe(container.value)
+    }
 
     // 2. 创建渲染器
     createRenderer()
@@ -402,6 +411,12 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
     }
     window.removeEventListener('resize', resize)
     
+    // 清理 ResizeObserver
+    if (resizeObserver) {
+      resizeObserver.disconnect()
+      resizeObserver = null
+    }
+    
     // 清理渲染器
     if (sceneStore.renderer) {
       sceneStore.renderer.dispose()
@@ -439,6 +454,14 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
 
   function attachTransformControl(id: string | null) {
     if (!transformControls.value) return
+    
+    // 预览模式下不显示变换控制器
+    if (!sceneStore.isEditMode) {
+      transformControls.value.detach()
+      pendingAttachId = null
+      return
+    }
+    
     if (!id) {
       transformControls.value.detach()
       pendingAttachId = null
@@ -672,6 +695,16 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
 
   watch(() => sceneStore.selectionVersion, () => {
     attachTransformControl(sceneStore.selectedObjectId)
+  })
+
+  // 监听编辑模式变化，切换到编辑模式时重新附加控制器
+  watch(() => sceneStore.isEditMode, (isEdit) => {
+    if (isEdit && sceneStore.selectedObjectId) {
+      attachTransformControl(sceneStore.selectedObjectId)
+    } else if (!isEdit) {
+      // 切换到预览模式时，移除控制器
+      transformControls.value?.detach()
+    }
   })
 
   watch(() => sceneStore.transformMode, (mode) => {

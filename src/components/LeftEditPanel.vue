@@ -1,17 +1,17 @@
 <script setup lang="ts">
-  import { type TreeDropInfo, type TreeOption, NIcon, type DropdownOption } from 'naive-ui'
+  import { type TreeDropInfo, type TreeOption, NIcon, type DropdownOption, NInput } from 'naive-ui'
   import { ref, computed, watch, h, type Component} from 'vue'
-  import { Cube, OptionsSharp, CubeOutline, ColorPalette, Camera, Move, Resize, Earth, ArrowUndo, ArrowRedo, SettingsOutline, FolderOutline } from '@vicons/ionicons5'
+  import { Cube, OptionsSharp, CubeOutline, ColorPalette, Camera, Move, Resize, Earth, ArrowUndo, ArrowRedo, SettingsOutline, FolderOutline, CopyOutline } from '@vicons/ionicons5'
   import { TextureOutlined, DeleteFilled, DriveFileRenameOutlineRound, LightbulbOutlined, Md3DRotationFilled, PlaceFilled } from '@vicons/material'
 
-  import AttributesPanel from './panles/Attributes.vue'
-  import GeometryAttrPanel from './panles/GeometryAttr.vue'
-  import MaterialAttrPanel from './panles/MaterialAttr.vue'
-  import HelperAttributesPanel from './panles/HelperAttr.vue'
-  import SceneAttrPanel from './panles/SceneAttr.vue'
-  import CameraAttrPanel from './panles/CameraAttr.vue'
-  import LightAttrPanel from './panles/LightAttr.vue'
-  import ProjectAttrPanel from './panles/ProjectAttr.vue'
+  import AttributesPanel from './panels/Attributes.vue'
+  import GeometryAttrPanel from './panels/GeometryAttr.vue'
+  import MaterialAttrPanel from './panels/MaterialAttr.vue'
+  import HelperAttributesPanel from './panels/HelperAttr.vue'
+  import SceneAttrPanel from './panels/SceneAttr.vue'
+  import CameraAttrPanel from './panels/CameraAttr.vue'
+  import LightAttrPanel from './panels/LightAttr.vue'
+  import ProjectAttrPanel from './panels/ProjectAttr.vue'
   import { useSceneStore } from '@/stores/modules/useScene.store'
   import { useUiEditorStore } from '@/stores/modules/uiEditor.store.ts'
   import { geometryTypeOptions } from '@/types/geometry'
@@ -125,11 +125,17 @@
   }
 
   const showDropdownRef = ref(false)
+  const renameInputRef = ref('')
   const optionsRef = ref<DropdownOption[]>([
     {
       label: '重命名',
       key: 'rename-object',
       icon: renderIcon(DriveFileRenameOutlineRound)
+    },
+    {
+      label: '复制对象',
+      key: 'duplicate-object',
+      icon: renderIcon(CopyOutline)
     },
     {
       label: '删除对象',
@@ -142,6 +148,89 @@
 
   function handleSelect(key: string | number) {
     switch (key) {
+      case 'rename-object': {
+        const currentName = sceneStore.currentObjectData?.name ?? ''
+        const id = sceneStore.selectedObjectId
+        if (!id || sceneStore.currentObjectData?.type === 'scene') {
+          sceneStore.notification?.warning({
+            title: '无法重命名',
+            content: '场景根节点不能重命名',
+            duration: 2000
+          })
+          break
+        }
+        renameInputRef.value = currentName
+        sceneStore.dialogProvider?.create({
+          title: '重命名',
+          content: () => h(NInput, {
+            value: renameInputRef.value,
+            placeholder: '请输入新名称',
+            autofocus: true,
+            onUpdateValue: (val: string) => { renameInputRef.value = val }
+          }),
+          positiveText: '确认',
+          negativeText: '取消',
+          draggable: true,
+          onPositiveClick: () => {
+            const newName = renameInputRef.value.trim()
+            if (newName && newName !== currentName) {
+              sceneStore.updateSceneObjectData(id, { name: newName })
+              // 手动刷新树，因为 name 变更不会触发 historyVersion 更新
+              treeData.value = sceneStore.getObjectTree()
+              sceneStore.notification?.success({
+                title: '重命名成功',
+                content: `"${currentName}" → "${newName}"`,
+                duration: 2000
+              })
+            }
+          }
+        })
+        break
+      }
+      case 'duplicate-object': {
+        const sourceData = sceneStore.currentObjectData
+        if (!sourceData || sourceData.type === 'scene') {
+          sceneStore.notification?.warning({
+            title: '无法复制',
+            content: '场景根节点不能复制',
+            duration: 2000
+          })
+          break
+        }
+        
+        // 深拷贝对象数据
+        const cloneData: any = {
+          type: sourceData.type,
+          name: `${sourceData.name}_copy`,
+          parentId: sourceData.parentId,
+          transform: JSON.parse(JSON.stringify(sourceData.transform)),
+          visible: sourceData.visible
+        }
+        
+        // 根据类型复制特定属性
+        if (sourceData.mesh) {
+          cloneData.mesh = JSON.parse(JSON.stringify(sourceData.mesh))
+        }
+        if (sourceData.helper) {
+          cloneData.helper = JSON.parse(JSON.stringify(sourceData.helper))
+        }
+        if (sourceData.userData) {
+          cloneData.userData = JSON.parse(JSON.stringify(sourceData.userData))
+        }
+        if (sourceData.assetId) {
+          cloneData.assetId = sourceData.assetId
+        }
+        
+        const created = sceneStore.addSceneObjectData(cloneData)
+        sceneStore.selectedObjectId = created.id
+        
+        sceneStore.notification?.success({
+          title: '复制成功',
+          content: `已创建 "${created.name}"`,
+          duration: 2000
+        })
+        break
+      }
       case 'delete-object': {
         const name = sceneStore.currentObjectData?.name ?? ''
         const childCount = sceneStore.currentObjectData?.childrenIds?.length || 0

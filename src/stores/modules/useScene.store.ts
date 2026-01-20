@@ -93,6 +93,9 @@ export const useSceneStore = defineStore('scene', () => {
   
   // 场景是否加载完成（用于控制撤销/重做按钮的可用状态）
   const isSceneReady = ref(false);
+  
+  // 是否为编辑模式（预览模式下禁用 TransformControls 等编辑功能）
+  const isEditMode = ref(true);
 
   function getAssetById(id: string) {
     return assets.value.find(asset => asset.id === id) ?? null
@@ -412,6 +415,7 @@ export const useSceneStore = defineStore('scene', () => {
     isSceneReady.value = false
     
     const { sceneData } = await initDB() // 初始化数据库并获取场景数据
+    currentSceneId.value = sceneData.id ?? null // 设置当前场景ID
     name.value = sceneData.name // store 名称
     version.value = sceneData.version // store 版本
     aIds.value = sceneData.aIds // 场景内对象自增ID
@@ -422,6 +426,14 @@ export const useSceneStore = defineStore('scene', () => {
     assets.value = (sceneData.assets ?? []) as AssetRef[]
     isRestoring.value = true
     objectDataList.value = sceneData.objectDataList ?? [] // 引擎逻辑层级
+
+    // 加载动画数据
+    if (sceneData.animationData) {
+      const { useAnimationStore } = await import('./useAnimation.store')
+      const animationStore = useAnimationStore()
+      animationStore.setAnimationData(sceneData.animationData)
+      console.log('[Scene] 已加载动画数据，剪辑数:', sceneData.animationData.clips?.length ?? 0)
+    }
 
     // 数据准备好后，确保 three 场景和对象同步
     const scene = threeScene.value ?? new Scene()
@@ -756,10 +768,12 @@ export const useSceneStore = defineStore('scene', () => {
     const assetChanged = patch.assetId !== undefined && patch.assetId !== target.assetId
     // 检查 parentId 是否在 patch 中（包括 undefined，表示要清除 parentId）
     const parentChanged = 'parentId' in patch && patch.parentId !== prevParentId
+    // 检查名称是否变更
+    const nameChanged = patch.name !== undefined && patch.name !== target.name
     
-    // 判断是否为关键操作：类型变更、helper变更、光源类型变更、父节点变更、资产变更
+    // 判断是否为关键操作：类型变更、helper变更、光源类型变更、父节点变更、资产变更、名称变更
     // 仅 transform 更新（拖拽）视为普通操作，走去抖
-    const isCritical = typeChanged || helperChanged || lightTypeChanged || parentChanged || assetChanged || meshChanged
+    const isCritical = typeChanged || helperChanged || lightTypeChanged || parentChanged || assetChanged || meshChanged || nameChanged
     let meshRebuilt = false
     if (typeChanged || helperChanged || lightTypeChanged) { // 类型或helper配置变更需要重建three对象
       const old = objectsMap.value.get(id) // 取出现有three对象
@@ -1098,6 +1112,11 @@ export const useSceneStore = defineStore('scene', () => {
         console.warn('截取场景截图失败:', error)
       }
       
+      // 获取动画数据
+      const { useAnimationStore } = await import('./useAnimation.store')
+      const animationStore = useAnimationStore()
+      const animationData = animationStore.getAnimationData()
+      
       await sceneApi.saveScene(targetId, {
         name: name.value,
         aIds: aIds.value,
@@ -1105,8 +1124,12 @@ export const useSceneStore = defineStore('scene', () => {
         objectDataList: objectDataList.value,
         assets: assets.value,
         rendererSettings: rendererSettings.value,
+        animationData: animationData,
         thumbnail: thumbnailUrl
       })
+      
+      // 标记动画数据已保存
+      animationStore.markSaved()
       
       notification.value!!.success({
         content: '保存成功！',
@@ -1194,6 +1217,7 @@ export const useSceneStore = defineStore('scene', () => {
     
     // 场景状态
     isSceneReady,
+    isEditMode,
     
     // 截图函数引用（由 useRenderer 设置）
     captureScreenshotFn,
