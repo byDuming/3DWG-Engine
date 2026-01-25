@@ -7,6 +7,7 @@
   import {
     CloudUploadOutline,
     ChevronDownOutline,
+    ChevronForwardOutline,
     ChevronUpOutline,
     CubeOutline,
     ImagesOutline,
@@ -43,6 +44,35 @@
   const zipParseResult = ref<TexturePackResult | null>(null)
   const zipUploading = ref(false)
   const zipUploadProgress = ref(0)
+
+  // 贴图模式：分类和搜索（仅贴图类别使用）
+  const searchKeyword = ref('')
+  const selectedTextureCategory = ref<string>('all')
+  const collapsedFolders = ref<Set<string>>(new Set())
+
+  // 贴图分类配置（与 TextureManager 对齐）
+  const TEXTURE_CATEGORIES = [
+    { key: 'all', label: '全部' },
+    { key: 'diffuse', label: '漫反射', patterns: [/_diffuse\./i, /_diff\./i, /_color\./i, /_albedo\./i, /_basecolor\./i, /_base_color\./i, /_col\./i] },
+    { key: 'normal', label: '法线', patterns: [/_normal\./i, /_nor\./i, /_nrm\./i, /_norm\./i, /_normalgl\./i, /_normaldx\./i] },
+    { key: 'roughness', label: '粗糙度', patterns: [/_roughness\./i, /_rough\./i, /_rgh\./i] },
+    { key: 'metalness', label: '金属度', patterns: [/_metalness\./i, /_metal\./i, /_metallic\./i, /_mtl\./i] },
+    { key: 'ao', label: 'AO', patterns: [/_ao\./i, /_ambient\./i, /_ambientocclusion\./i, /_occlusion\./i, /_occ\./i] },
+    { key: 'emissive', label: '自发光', patterns: [/_emissive\./i, /_emission\./i, /_emit\./i, /_glow\./i] },
+    { key: 'displacement', label: '位移', patterns: [/_displacement\./i, /_disp\./i, /_height\./i] },
+    { key: 'other', label: '其他' },
+  ]
+
+  function getTextureCategory(name: string): string {
+    const lowerName = name.toLowerCase()
+    for (const cat of TEXTURE_CATEGORIES) {
+      if (cat.key === 'all' || cat.key === 'other') continue
+      if (cat.patterns?.some(p => p.test(lowerName))) {
+        return cat.key
+      }
+    }
+    return 'other'
+  }
 
   // 资产类别配置
   const categories: Array<{ key: AssetCategory; label: string; icon: any; accept: string; description: string }> = [
@@ -85,6 +115,53 @@
       return false
     })
   })
+
+  // 贴图模式：按 PBR 分类与搜索过滤
+  const filteredTextureAssets = computed(() => {
+    if (currentCategory.value.key !== 'texture') return []
+    let result = filteredAssets.value
+    if (selectedTextureCategory.value !== 'all') {
+      result = result.filter(asset => getTextureCategory(asset.name) === selectedTextureCategory.value)
+    }
+    if (searchKeyword.value.trim()) {
+      const keyword = searchKeyword.value.toLowerCase().trim()
+      result = result.filter(asset => asset.name.toLowerCase().includes(keyword))
+    }
+    return result
+  })
+
+  // 贴图模式：各 PBR 分类数量
+  const categoryCounts = computed(() => {
+    if (currentCategory.value.key !== 'texture') return { all: 0 } as Record<string, number>
+    const counts: Record<string, number> = { all: filteredAssets.value.length }
+    for (const asset of filteredAssets.value) {
+      const cat = getTextureCategory(asset.name)
+      counts[cat] = (counts[cat] || 0) + 1
+    }
+    return counts
+  })
+
+  // 贴图模式：按 meta.folder 分组
+  const groupedByFolder = computed(() => {
+    const map: Record<string, AssetRef[]> = {}
+    for (const asset of filteredTextureAssets.value) {
+      const key = asset.meta?.folder ?? ''
+      if (!map[key]) map[key] = []
+      map[key]!.push(asset)
+    }
+    return map
+  })
+
+  // 贴图模式：文件夹展示顺序（未分组优先，其余按名排序）
+  const folderRowKeys = computed(() => {
+    const keys = Object.keys(groupedByFolder.value)
+    const rest = keys.filter(k => k !== '').sort()
+    return (keys.includes('') ? ['', ...rest] : rest) as string[]
+  })
+
+  function getFolderDisplayName(key: string): string {
+    return key === '' ? '未分组' : key
+  }
 
   // 切换类别时重新加载对应类型的资产
   watch(() => uiEditorStore.activeAssetCategory, (newCategory) => {
@@ -251,6 +328,7 @@
     if (!zipParseResult.value || !assetApi.isStorageAvailable()) return
 
     const textures = zipParseResult.value.textures
+    const folderName = (zipParseResult.value.packName || '未命名').trim() || 'zip'
     zipUploading.value = true
     zipUploadProgress.value = 0
 
@@ -263,6 +341,7 @@
         const result = await assetApi.uploadAsset({
           file: texture.file,
           type: 'texture',
+          folder: folderName,
         })
         uploadedAssets.push(result.asset)
         sceneStore.registerRemoteAsset(result.asset)
@@ -285,6 +364,49 @@
     } else {
       message.success(`${uploadedAssets.length} 个贴图全部上传成功`)
     }
+  }
+
+  function toggleFolder(key: string) {
+    const next = new Set(collapsedFolders.value)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    collapsedFolders.value = next
+  }
+
+  // 删除文件夹（删除该文件夹下全部贴图）
+  async function handleDeleteFolder(folderKey: string) {
+    const assets = globalAssets.value.filter((a) => (a.meta?.folder ?? '') === folderKey)
+    const n = assets.length
+    const label = getFolderDisplayName(folderKey)
+    dialog.warning({
+      title: '确认删除',
+      content: `确定要删除「${label}」及其下 ${n} 个贴图吗？此操作不可恢复。`,
+      positiveText: '确定',
+      negativeText: '取消',
+      onPositiveClick: async () => {
+        let ok = 0
+        let fail = 0
+        for (const asset of assets) {
+          try {
+            const success = await assetApi.deleteAsset(asset)
+            if (success) {
+              const idx = globalAssets.value.findIndex((a) => a.id === asset.id)
+              if (idx > -1) globalAssets.value.splice(idx, 1)
+              ok++
+            } else {
+              fail++
+            }
+          } catch {
+            fail++
+          }
+        }
+        if (fail > 0) {
+          message.warning(`已删除 ${ok} 个，${fail} 个删除失败`)
+        } else {
+          message.success(`已删除 ${ok} 个贴图`)
+        }
+      },
+    })
   }
 
   // 删除资产
@@ -453,59 +575,178 @@
             </div>
           </div>
 
+          <!-- 搜索和分类栏（仅贴图） -->
+          <div v-if="currentCategory.key === 'texture'" class="filter-bar">
+            <n-input
+              v-model:value="searchKeyword"
+              placeholder="搜索贴图..."
+              size="small"
+              clearable
+              class="search-input"
+            >
+              <template #prefix>
+                <n-icon size="16" color="#999">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M10 2a8 8 0 105.293 14.707l5 5a1 1 0 001.414-1.414l-5-5A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/>
+                  </svg>
+                </n-icon>
+              </template>
+            </n-input>
+            <div class="category-tabs">
+              <button
+                v-for="cat in TEXTURE_CATEGORIES"
+                :key="cat.key"
+                class="category-tab"
+                :class="{ active: selectedTextureCategory === cat.key }"
+                @click="selectedTextureCategory = cat.key"
+              >
+                {{ cat.label }}
+                <span v-if="categoryCounts[cat.key]" class="category-count">{{ categoryCounts[cat.key] }}</span>
+              </button>
+            </div>
+          </div>
+
           <!-- 资产列表 -->
           <div class="asset-list">
             <n-spin :show="loading">
-              <n-scrollbar v-if="filteredAssets.length > 0" style="max-height: calc(100% - 8px);">
-                <div class="asset-grid">
-                  <div
-                    v-for="asset in filteredAssets"
-                    :key="asset.id"
-                    class="asset-item"
-                    @click="handleImportAsset(asset)"
-                  >
-                    <!-- 预览图 -->
-                    <div class="asset-preview" :class="{ 'texture-preview': asset.type === 'texture' }">
-                      <img
-                        v-if="asset.thumbnail || asset.type === 'texture'"
-                        :src="asset.thumbnail || asset.uri"
-                        :alt="asset.name"
-                        loading="lazy"
-                      />
-                      <n-icon v-else size="32" color="#1d1d1d">
-                        <component :is="currentCategory.icon" />
-                      </n-icon>
-                      <!-- 悬停操作 -->
-                      <div class="asset-overlay">
-                        <n-button size="tiny" type="primary" @click.stop="handleImportAsset(asset)">
-                          导入
-                        </n-button>
-                        <n-button size="tiny" type="error" @click.stop="handleDeleteAsset(asset)">
+              <!-- 贴图模式：文件夹分组 -->
+              <template v-if="currentCategory.key === 'texture'">
+                <n-scrollbar v-if="folderRowKeys.length > 0" style="max-height: calc(100% - 8px);">
+                  <div class="folder-list">
+                    <div
+                      v-for="key in folderRowKeys"
+                      :key="key || '__root__'"
+                      class="folder-block"
+                    >
+                      <div class="folder-header" @click="toggleFolder(key)">
+                        <n-icon class="folder-chevron" :size="16">
+                          <ChevronDownOutline v-if="!collapsedFolders.has(key)" />
+                          <ChevronForwardOutline v-else />
+                        </n-icon>
+                        <n-icon :size="18"><FolderOpenOutline /></n-icon>
+                        <span class="folder-name">{{ getFolderDisplayName(key) }}</span>
+                        <span class="folder-count">{{ (groupedByFolder[key] ?? []).length }}</span>
+                        <n-button
+                          size="tiny"
+                          type="error"
+                          quaternary
+                          class="folder-delete"
+                          @click.stop="handleDeleteFolder(key)"
+                        >
                           <template #icon>
                             <n-icon><DeleteFilled /></n-icon>
                           </template>
                         </n-button>
                       </div>
+                      <div v-show="!collapsedFolders.has(key)" class="folder-content">
+                        <div class="asset-grid">
+                          <div
+                            v-for="asset in (groupedByFolder[key] ?? [])"
+                            :key="asset.id"
+                            class="asset-item"
+                            @click="handleImportAsset(asset)"
+                          >
+                            <div class="asset-preview" :class="{ 'texture-preview': asset.type === 'texture' }">
+                              <img
+                                v-if="asset.thumbnail || asset.type === 'texture'"
+                                :src="asset.thumbnail || asset.uri"
+                                :alt="asset.name"
+                                loading="lazy"
+                              />
+                              <n-icon v-else size="32" color="#1d1d1d">
+                                <component :is="currentCategory.icon" />
+                              </n-icon>
+                              <div class="asset-overlay">
+                                <n-button size="tiny" type="primary" @click.stop="handleImportAsset(asset)">
+                                  导入
+                                </n-button>
+                                <n-button size="tiny" type="error" @click.stop="handleDeleteAsset(asset)">
+                                  <template #icon>
+                                    <n-icon><DeleteFilled /></n-icon>
+                                  </template>
+                                </n-button>
+                              </div>
+                            </div>
+                            <div class="asset-name">
+                              <n-ellipsis :line-clamp="1" :tooltip="{ placement: 'top' }">
+                                {{ asset.name }}
+                              </n-ellipsis>
+                            </div>
+                            <div class="asset-size">{{ formatFileSize(asset.meta?.size) }}</div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <!-- 名称 -->
-                    <div class="asset-name">
-                      <n-ellipsis :line-clamp="1" :tooltip="{ placement: 'top' }">
-                        {{ asset.name }}
-                      </n-ellipsis>
-                    </div>
-                    <div class="asset-size">{{ formatFileSize(asset.meta?.size) }}</div>
                   </div>
+                </n-scrollbar>
+                <div v-else class="empty-state">
+                  <n-icon size="40" color="#666">
+                    <FolderOpenOutline />
+                  </n-icon>
+                  <template v-if="filteredAssets.length === 0">
+                    <div class="empty-text">暂无贴图</div>
+                    <div class="empty-hint">上传贴图或导入 PBR 贴图压缩包</div>
+                  </template>
+                  <template v-else>
+                    <div class="empty-text">无匹配结果</div>
+                    <div class="empty-hint">
+                      {{ searchKeyword ? `未找到包含"${searchKeyword}"的贴图` : '该分类下暂无贴图' }}
+                    </div>
+                    <n-button size="small" @click="searchKeyword = ''; selectedTextureCategory = 'all'">
+                      重置筛选
+                    </n-button>
+                  </template>
                 </div>
-              </n-scrollbar>
+              </template>
 
-              <!-- 空状态 -->
-              <div v-else class="empty-state">
-                <n-icon size="40" color="#666">
-                  <component :is="currentCategory.icon" />
-                </n-icon>
-                <div class="empty-text">暂无{{ currentCategory.label }}</div>
-                <div class="empty-hint">{{ currentCategory.description }}</div>
-              </div>
+              <!-- 非贴图模式：扁平列表 -->
+              <template v-else>
+                <n-scrollbar v-if="filteredAssets.length > 0" style="max-height: calc(100% - 8px);">
+                  <div class="asset-grid">
+                    <div
+                      v-for="asset in filteredAssets"
+                      :key="asset.id"
+                      class="asset-item"
+                      @click="handleImportAsset(asset)"
+                    >
+                      <div class="asset-preview" :class="{ 'texture-preview': asset.type === 'texture' }">
+                        <img
+                          v-if="asset.thumbnail || asset.type === 'texture'"
+                          :src="asset.thumbnail || asset.uri"
+                          :alt="asset.name"
+                          loading="lazy"
+                        />
+                        <n-icon v-else size="32" color="#1d1d1d">
+                          <component :is="currentCategory.icon" />
+                        </n-icon>
+                        <div class="asset-overlay">
+                          <n-button size="tiny" type="primary" @click.stop="handleImportAsset(asset)">
+                            导入
+                          </n-button>
+                          <n-button size="tiny" type="error" @click.stop="handleDeleteAsset(asset)">
+                            <template #icon>
+                              <n-icon><DeleteFilled /></n-icon>
+                            </template>
+                          </n-button>
+                        </div>
+                      </div>
+                      <div class="asset-name">
+                        <n-ellipsis :line-clamp="1" :tooltip="{ placement: 'top' }">
+                          {{ asset.name }}
+                        </n-ellipsis>
+                      </div>
+                      <div class="asset-size">{{ formatFileSize(asset.meta?.size) }}</div>
+                    </div>
+                  </div>
+                </n-scrollbar>
+                <div v-else class="empty-state">
+                  <n-icon size="40" color="#666">
+                    <component :is="currentCategory.icon" />
+                  </n-icon>
+                  <div class="empty-text">暂无{{ currentCategory.label }}</div>
+                  <div class="empty-hint">{{ currentCategory.description }}</div>
+                </div>
+              </template>
             </n-spin>
           </div>
         </div>
@@ -748,10 +989,139 @@
   gap: 8px;
 }
 
+/* 搜索和分类栏（贴图模式） */
+.filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--n-border-color, #e0e0e0);
+  flex-shrink: 0;
+}
+
+.search-input {
+  width: 100%;
+}
+
+.category-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 2px 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.category-tabs::-webkit-scrollbar {
+  height: 4px;
+}
+
+.category-tabs::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 2px;
+}
+
+.category-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  border: none;
+  border-radius: 4px;
+  background: var(--n-color-embedded, #f5f5f5);
+  color: var(--n-text-color-2, #666);
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.category-tab:hover {
+  background: var(--n-color-hover, #e8e8e8);
+}
+
+.category-tab.active {
+  background: var(--n-primary-color, #18a058);
+  color: white;
+}
+
+.category-count {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.category-tab.active .category-count {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* 贴图模式：文件夹分组 */
+.folder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.folder-block {
+  border-radius: 8px;
+  background: var(--n-color-embedded, #f5f5f5);
+  overflow: hidden;
+}
+
+.folder-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s;
+}
+
+.folder-header:hover {
+  background: var(--n-color-hover, #e8e8e8);
+}
+
+.folder-chevron {
+  flex-shrink: 0;
+  color: var(--n-text-color-2, #666);
+}
+
+.folder-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--n-text-color-1, #333);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-count {
+  font-size: 11px;
+  color: var(--n-text-color-3, #999);
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+}
+
+.folder-delete {
+  flex-shrink: 0;
+}
+
+.folder-content {
+  padding: 0 12px 12px;
+}
+
+.folder-content .asset-grid {
+  margin: 0;
+}
+
 .asset-list {
   flex: 1;
+  min-height: 0;
   padding: 8px;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .asset-grid {

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 几何体数据类型定义与选项列表。
  */
 export type GeometryData =
@@ -13,6 +13,7 @@ export type GeometryData =
   | CircleGeometryData
   | RingGeometryData
   | CapsuleGeometryData
+  | SpriteGeometryData
 
 export type GeometryType = GeometryData['type']
 
@@ -30,7 +31,8 @@ export const geometryTypeOptions: Array<{ label: string; value: GeometryType }> 
   { label: '十二面体', value: 'dodecahedron' },
   { label: '二十面体', value: 'icosahedron' },
   { label: '圆', value: 'circle' },
-  { label: '环形', value: 'ring' }
+  { label: '环形', value: 'ring' },
+  { label: '精灵', value: 'sprite' }
 ]
 
 interface BaseGeometryData {
@@ -137,4 +139,8 @@ export interface CapsuleGeometryData extends BaseGeometryData {
   length?: number
   capSegments?: number
   radialSegments?: number
+}
+
+export interface SpriteGeometryData extends BaseGeometryData {
+  type: 'sprite'
 }

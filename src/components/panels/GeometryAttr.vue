@@ -14,7 +14,8 @@ import type {
   PolyhedronGeometryData,
   CircleGeometryData,
   RingGeometryData,
-  CapsuleGeometryData
+  CapsuleGeometryData,
+  SpriteGeometryData
 } from '@/types/geometry'
 
 const sceneStore = useSceneStore()
@@ -42,6 +43,7 @@ const polyhedronGeometry = computed(() =>
 const circleGeometry = computed(() => geometry.value?.type === 'circle' ? (geometry.value as CircleGeometryData) : null)
 const ringGeometry = computed(() => geometry.value?.type === 'ring' ? (geometry.value as RingGeometryData) : null)
 const capsuleGeometry = computed(() => geometry.value?.type === 'capsule' ? (geometry.value as CapsuleGeometryData) : null)
+const spriteGeometry = computed(() => geometry.value?.type === 'sprite' ? (geometry.value as SpriteGeometryData) : null)
 </script>
 
 <template>
@@ -58,6 +60,14 @@ const capsuleGeometry = computed(() => geometry.value?.type === 'capsule' ? (geo
           <n-input :value="geometryType" type="text" disabled />
         </n-gi>
       </n-grid>
+
+      <!-- Sprite 精灵 -->
+      <template v-if="spriteGeometry">
+        <n-grid x-gap="6" :cols="10">
+          <n-gi class="gid-item" :span="3">说明</n-gi>
+          <n-gi class="gid-item" :span="7">精灵为面向相机的平面，尺寸与贴图在材质中设置。</n-gi>
+        </n-grid>
+      </template>
 
       <!-- Box 几何体 -->
       <template v-if="boxGeometry">

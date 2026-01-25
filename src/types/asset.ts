@@ -15,6 +15,7 @@ export type AssetRef = {
     ext?: string
     size?: number
     mime?: string
+    folder?: string // 文件夹（ZIP 导入时取压缩包名，用于分组展示）
   }
   createdAt?: number
 }

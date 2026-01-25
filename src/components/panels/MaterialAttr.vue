@@ -1130,6 +1130,12 @@ function updateMaterialVec2(key: string, axis: 0 | 1, value: number | null, fall
     <!-- Sprite 属性 -->
     <template v-if="showSprite">
       <n-grid x-gap="6" :cols="10">
+        <n-gi class="gid-item" :span="3">大小</n-gi>
+        <n-gi class="gid-item" :span="7">
+          <PropertyNumber path="mesh.material.size" :default-value="1" :step="0.1" :min="0" :max="1000" :precision="2" />
+        </n-gi>
+      </n-grid>
+      <n-grid x-gap="6" :cols="10">
         <n-gi class="gid-item" :span="3">大小衰减</n-gi>
         <n-gi class="gid-item" :span="7">
           <PropertySwitch path="mesh.material.sizeAttenuation" :default-value="true" />

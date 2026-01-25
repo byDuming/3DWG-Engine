@@ -218,6 +218,9 @@ function normalizeGeometry(input?: GeometryData): GeometryData {
       }
       return result
     }
+    case 'sprite': {
+      return { type: 'sprite' }
+    }
     default: {
       const fallback: BoxGeometryData = {
         type: 'box',

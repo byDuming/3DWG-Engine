@@ -12,6 +12,8 @@ const STORAGE_BUCKET = 'assets'
 export interface UploadAssetParams {
   file: File
   type: AssetRef['type']
+  /** 文件夹（ZIP 导入时取压缩包名，用于分组展示） */
+  folder?: string
 }
 
 /**
@@ -67,7 +69,7 @@ export class AssetApi {
       throw new Error('Supabase Storage 未配置，请检查环境变量')
     }
 
-    const { file, type } = params
+    const { file, type, folder } = params
 
     // 生成资产ID
     const assetId = `asset-${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -107,7 +109,8 @@ export class AssetApi {
         meta: {
           ext,
           size: file.size,
-          mime: file.type
+          mime: file.type,
+          ...(typeof folder === 'string' && folder.length > 0 && { folder })
         },
         createdAt: Date.now()
       }
@@ -345,16 +348,23 @@ export class AssetApi {
       
       console.log(`✅ 获取到 ${data?.length ?? 0} 个全局资产`, type ? `(类型: ${type})` : '')
 
-      return (data || []).map((row: any) => ({
-        id: row.id,
-        type: row.type,
-        uri: row.uri,
-        name: row.name,
-        source: row.source,
-        thumbnail: row.thumbnail,
-        meta: row.meta,
-        createdAt: new Date(row.created_at).getTime()
-      }))
+      return (data || []).map((row: any) => {
+        let meta = row.meta
+        if (typeof meta === 'string') {
+          try { meta = JSON.parse(meta) } catch { meta = {} }
+        }
+        if (!meta || typeof meta !== 'object') meta = {}
+        return {
+          id: row.id,
+          type: row.type,
+          uri: row.uri,
+          name: row.name,
+          source: row.source,
+          thumbnail: row.thumbnail,
+          meta,
+          createdAt: new Date(row.created_at).getTime()
+        }
+      })
     } catch (error) {
       console.error('获取资产列表失败:', error)
       return []

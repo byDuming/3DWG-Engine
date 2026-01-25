@@ -415,13 +415,14 @@
     const parentId = sceneStore.selectedObjectId ?? 'Scene'
 
     if (geometryOption) {
+      const isSprite = geometryOption.value === 'sprite'
       const created = sceneStore.addSceneObjectData({
         type: 'mesh',
         name: geometryOption.label,
         parentId,
         mesh: {
           geometry: { type: geometryOption.value },
-          material: { type: 'standard' }
+          material: { type: isSprite ? 'sprite' : 'standard' }
         }
       })
       sceneStore.selectedObjectId = created.id

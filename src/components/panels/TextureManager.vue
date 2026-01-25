@@ -13,6 +13,8 @@ import {
   FolderOpenOutline,
   CheckmarkCircleOutline,
   CloseCircleOutline,
+  ChevronDownOutline,
+  ChevronForwardOutline,
 } from '@vicons/ionicons5'
 import { DeleteFilled } from '@vicons/material'
 import type { AssetRef } from '@/types/asset'
@@ -105,6 +107,38 @@ const categoryCounts = computed(() => {
   
   return counts
 })
+
+// 按文件夹分组（在 filteredTextureAssets 基础上）
+const groupedByFolder = computed(() => {
+  const map: Record<string, AssetRef[]> = {}
+  for (const asset of filteredTextureAssets.value) {
+    const key = asset.meta?.folder ?? ''
+    if (!map[key]) map[key] = []
+    map[key]!.push(asset)
+  }
+  return map
+})
+
+// 展示顺序：未分组优先，其余按文件夹名排序
+const folderRowKeys = computed(() => {
+  const keys = Object.keys(groupedByFolder.value)
+  const rest = keys.filter(k => k !== '').sort()
+  return (keys.includes('') ? ['', ...rest] : rest) as string[]
+})
+
+// 折叠状态（默认全部展开，即 Set 为空表示不折叠）
+const collapsedFolders = ref<Set<string>>(new Set())
+
+function toggleFolder(key: string) {
+  const next = new Set(collapsedFolders.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  collapsedFolders.value = next
+}
+
+function getFolderDisplayName(key: string): string {
+  return key === '' ? '未分组' : key
+}
 
 // ZIP 导入相关
 const showZipDialog = ref(false)
@@ -206,6 +240,9 @@ async function uploadZipTextures() {
   if (!zipParseResult.value || !assetApi.isStorageAvailable()) return
 
   const textures = zipParseResult.value.textures
+  // 用压缩包名作为文件夹，保证非空（parseTexturePack 已对空名做 fallback，此处再兜底）
+  const folderName = (zipParseResult.value.packName || '未命名').trim() || 'zip'
+
   zipUploading.value = true
   zipUploadProgress.value = 0
 
@@ -218,6 +255,7 @@ async function uploadZipTextures() {
       const result = await assetApi.uploadAsset({
         file: texture.file,
         type: 'texture',
+        folder: folderName,
       })
       uploadedAssets.push(result.asset)
       sceneStore.registerRemoteAsset(result.asset)
@@ -271,6 +309,42 @@ async function handleDeleteTexture(asset: AssetRef) {
       } catch (error: any) {
         console.error('删除贴图失败:', error)
         message.error(`删除失败: ${error.message || '未知错误'}`)
+      }
+    },
+  })
+}
+
+// 删除文件夹（删除该文件夹下全部贴图）
+async function handleDeleteFolder(folderKey: string) {
+  const assets = textureAssets.value.filter((a) => (a.meta?.folder ?? '') === folderKey)
+  const n = assets.length
+  const label = getFolderDisplayName(folderKey)
+  dialog.warning({
+    title: '确认删除',
+    content: `确定要删除「${label}」及其下 ${n} 个贴图吗？此操作不可恢复。`,
+    positiveText: '确定',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      let ok = 0
+      let fail = 0
+      for (const asset of assets) {
+        try {
+          const success = await assetApi.deleteAsset(asset)
+          if (success) {
+            const idx = textureAssets.value.findIndex((a) => a.id === asset.id)
+            if (idx > -1) textureAssets.value.splice(idx, 1)
+            ok++
+          } else {
+            fail++
+          }
+        } catch {
+          fail++
+        }
+      }
+      if (fail > 0) {
+        message.warning(`已删除 ${ok} 个，${fail} 个删除失败`)
+      } else {
+        message.success(`已删除 ${ok} 个贴图`)
       }
     },
   })
@@ -371,50 +445,78 @@ function getTexturePreview(asset: AssetRef): string {
     <!-- 贴图网格 -->
     <div class="texture-grid-container">
       <n-spin :show="loading">
-        <n-scrollbar v-if="filteredTextureAssets.length > 0" style="max-height: 100%;">
-          <div class="texture-grid">
+        <n-scrollbar v-if="folderRowKeys.length > 0" style="max-height: 100%;">
+          <div class="folder-list">
             <div
-              v-for="asset in filteredTextureAssets"
-              :key="asset.id"
-              class="texture-item"
-              :class="{ 'select-mode': selectMode }"
-              @click="handleSelectTexture(asset)"
+              v-for="key in folderRowKeys"
+              :key="key || '__root__'"
+              class="folder-block"
             >
-              <!-- 预览图 -->
-              <div class="texture-preview">
-                <img
-                  :src="getTexturePreview(asset)"
-                  :alt="asset.name"
-                  loading="lazy"
-                />
-                <!-- 悬停操作 -->
-                <div class="texture-overlay">
-                  <n-button
-                    v-if="selectMode"
-                    size="tiny"
-                    type="primary"
-                    @click.stop="handleSelectTexture(asset)"
-                  >
-                    选择
-                  </n-button>
-                  <n-button
-                    v-if="!selectMode"
-                    size="tiny"
-                    type="error"
-                    @click.stop="handleDeleteTexture(asset)"
-                  >
-                    <template #icon>
-                      <n-icon><DeleteFilled /></n-icon>
-                    </template>
-                  </n-button>
-                </div>
+              <div class="folder-header" @click="toggleFolder(key)">
+                <n-icon class="folder-chevron" :size="16">
+                  <ChevronDownOutline v-if="!collapsedFolders.has(key)" />
+                  <ChevronForwardOutline v-else />
+                </n-icon>
+                <n-icon :size="18"><FolderOpenOutline /></n-icon>
+                <span class="folder-name">{{ getFolderDisplayName(key) }}</span>
+                <span class="folder-count">{{ (groupedByFolder[key] ?? []).length }}</span>
+                <n-button
+                  v-if="!selectMode"
+                  size="tiny"
+                  type="error"
+                  quaternary
+                  class="folder-delete"
+                  @click.stop="handleDeleteFolder(key)"
+                >
+                  <template #icon>
+                    <n-icon><DeleteFilled /></n-icon>
+                  </template>
+                </n-button>
               </div>
-              <!-- 信息 -->
-              <div class="texture-info">
-                <n-ellipsis class="texture-name" :line-clamp="1">
-                  {{ asset.name }}
-                </n-ellipsis>
-                <span class="texture-size">{{ formatFileSize(asset.meta?.size) }}</span>
+              <div v-show="!collapsedFolders.has(key)" class="folder-content">
+                <div class="texture-grid">
+                  <div
+                    v-for="asset in (groupedByFolder[key] ?? [])"
+                    :key="asset.id"
+                    class="texture-item"
+                    :class="{ 'select-mode': selectMode }"
+                    @click="handleSelectTexture(asset)"
+                  >
+                    <div class="texture-preview">
+                      <img
+                        :src="getTexturePreview(asset)"
+                        :alt="asset.name"
+                        loading="lazy"
+                      />
+                      <div class="texture-overlay">
+                        <n-button
+                          v-if="selectMode"
+                          size="tiny"
+                          type="primary"
+                          @click.stop="handleSelectTexture(asset)"
+                        >
+                          选择
+                        </n-button>
+                        <n-button
+                          v-if="!selectMode"
+                          size="tiny"
+                          type="error"
+                          @click.stop="handleDeleteTexture(asset)"
+                        >
+                          <template #icon>
+                            <n-icon><DeleteFilled /></n-icon>
+                          </template>
+                        </n-button>
+                      </div>
+                    </div>
+                    <div class="texture-info">
+                      <n-ellipsis class="texture-name" :line-clamp="1">
+                        {{ asset.name }}
+                      </n-ellipsis>
+                      <span class="texture-size">{{ formatFileSize(asset.meta?.size) }}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -630,8 +732,70 @@ function getTexturePreview(asset: AssetRef): string {
 
 .texture-grid-container {
   flex: 1;
-  overflow: hidden;
+  min-height: 0;
+  overflow: auto;
   padding: 12px;
+}
+
+.folder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.folder-block {
+  border-radius: 8px;
+  background: var(--n-color-embedded, #f5f5f5);
+  overflow: hidden;
+}
+
+.folder-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s;
+}
+
+.folder-header:hover {
+  background: var(--n-color-hover, #e8e8e8);
+}
+
+.folder-chevron {
+  flex-shrink: 0;
+  color: var(--n-text-color-2, #666);
+}
+
+.folder-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--n-text-color-1, #333);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-count {
+  font-size: 11px;
+  color: var(--n-text-color-3, #999);
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+}
+
+.folder-delete {
+  flex-shrink: 0;
+}
+
+.folder-content {
+  padding: 0 12px 12px;
+}
+
+.folder-content .texture-grid {
+  margin: 0;
 }
 
 .texture-grid {

@@ -649,6 +649,7 @@ export interface PointsMaterialData extends BaseMaterialData {
  */
 export interface SpriteMaterialData extends MapMaterialData {
   type: 'sprite';
+  size?: number;
   sizeAttenuation?: boolean;
 }
 

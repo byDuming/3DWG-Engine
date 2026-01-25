@@ -227,8 +227,9 @@ export async function parseTexturePack(zipFile: File): Promise<TexturePackResult
   const textures: ParsedTexture[] = []
   const unmatched: string[] = []
   
-  // 获取压缩包名称（去除扩展名）
-  const packName = zipFile.name.replace(/\.(zip|rar|7z)$/i, '')
+  // 获取压缩包名称（去除扩展名）；若为空则用 fallback，确保导入后必有文件夹
+  const raw = (zipFile.name || '').replace(/\.(zip|rar|7z)$/i, '').trim()
+  const packName = raw || '未命名'
   
   // 遍历 ZIP 中的所有文件
   const filePromises: Promise<void>[] = []

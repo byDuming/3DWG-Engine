@@ -28,6 +28,7 @@ import {
   PointsMaterial,
   RingGeometry,
   ShadowMaterial,
+  Sprite,
   SpriteMaterial,
   SphereGeometry,
   TetrahedronGeometry,
@@ -745,6 +746,8 @@ function createGeometryFromData(geo?: GeometryData) {
         geo.capSegments ?? 4,
         geo.radialSegments ?? 8
       )
+    case 'sprite':
+      return new PlaneGeometry(0.001, 0.001)
     default:
       return new BoxGeometry(1, 1, 1)
   }
@@ -848,8 +851,12 @@ function createMaterialFromData(mat?: MaterialData) {
       return material
     }
     case 'sprite': {
-      const material = new SpriteMaterial({ color: baseColor })
+      const material = new SpriteMaterial({
+        color: baseColor,
+        sizeAttenuation: (mat as any).sizeAttenuation ?? true
+      })
       applyCommonMaterialProps(material, mat)
+      applyMaterialSpecificProps(material, mat)
       applyMaps(material, mat)
       return material
     }
@@ -1055,6 +1062,11 @@ export function createThreeObject(data: SceneObjectData, opts?: { objectsMap?: M
       obj = new Group()
       break
     case 'mesh': {
+      if (data.mesh?.geometry?.type === 'sprite') {
+        const mat = createMaterialFromData(data.mesh?.material ?? { type: 'sprite' })
+        obj = new Sprite(mat)
+        break
+      }
       const geometry = createGeometryFromData(data.mesh?.geometry)
       ensureUV2(geometry) // 确保有 uv2 属性，让 aoMap 和 lightMap 正常工作
       obj = new Mesh(geometry, createMaterialFromData(data.mesh?.material))
@@ -1089,6 +1101,11 @@ export function createThreeObject(data: SceneObjectData, opts?: { objectsMap?: M
   obj.userData.sceneObjectId = data.id
   obj.userData.sceneObjectType = data.type
   applyTransform(obj, data)
+  // Sprite 的尺寸由 obj.scale 控制，SpriteMaterial 无 size 属性；将 material.size 同步到 scale
+  if (obj instanceof Sprite && data.mesh?.geometry?.type === 'sprite') {
+    const s = (data.mesh?.material as any)?.size ?? 1
+    obj.scale.set(s, s, 1)
+  }
   return obj
 }
 
