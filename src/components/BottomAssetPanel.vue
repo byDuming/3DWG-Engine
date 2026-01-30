@@ -15,7 +15,8 @@
     SunnyOutline,
     PlayOutline,
     FolderOutline,
-    FolderOpenOutline
+    FolderOpenOutline,
+    RefreshOutline
   } from '@vicons/ionicons5'
   import { DeleteFilled, CloudCircleFilled } from '@vicons/material'
   import type { AssetRef } from '@/types/asset'
@@ -289,8 +290,44 @@
         message.info(`贴图 URL: ${asset.uri}`)
       }
     } else if (asset.type === 'hdri') {
-      // TODO: 应用HDRI到场景环境
-      message.info('HDRI功能开发中')
+      // 应用HDRI到场景环境
+      if (!sceneStore.threeScene) {
+        message.warning('场景未初始化，请稍候再试')
+        return
+      }
+
+      // 查找场景对象
+      const sceneObject = sceneStore.objectDataList.find(obj => obj.type === 'scene')
+      if (!sceneObject) {
+        message.warning('请先选择场景对象')
+        return
+      }
+
+      try {
+        loading.value = true
+        // 注册资产到当前场景
+        sceneStore.registerRemoteAsset(asset)
+        
+        // 更新场景环境设置（.hdr 或 .exr 都使用 'hdr' 类型）
+        // 同时设置环境贴图（用于光照）和背景（用于显示）
+        const currentScene = sceneObject.scene ?? {}
+        await sceneStore.updateSceneObjectData(sceneObject.id, {
+          scene: {
+            ...currentScene,
+            environmentType: 'hdr',
+            environmentMap: asset.uri,
+            backgroundType: 'texture',
+            backgroundTexture: asset.uri
+          }
+        } as any)
+        
+        message.success(`HDRI "${asset.name}" 已应用到场景环境`)
+      } catch (error: any) {
+        console.error('应用HDRI失败:', error)
+        message.error(`应用失败: ${error.message || '未知错误'}`)
+      } finally {
+        loading.value = false
+      }
     }
   }
 
@@ -540,6 +577,12 @@
               <span class="category-label">{{ currentCategory.label }}</span>
             </div>
             <div class="toolbar-right">
+              <!-- 刷新按钮 -->
+              <n-button size="small" quaternary @click="loadGlobalAssets(currentCategory.key as AssetRef['type'])" :loading="loading">
+                <template #icon>
+                  <n-icon><RefreshOutline /></n-icon>
+                </template>
+              </n-button>
               <!-- ZIP 导入（仅贴图） -->
               <n-upload
                 v-if="currentCategory.key === 'texture'"
@@ -711,11 +754,17 @@
                     >
                       <div class="asset-preview" :class="{ 'texture-preview': asset.type === 'texture' }">
                         <img
-                          v-if="asset.thumbnail || asset.type === 'texture'"
+                          v-if="asset.thumbnail || (asset.type === 'texture')"
                           :src="asset.thumbnail || asset.uri"
                           :alt="asset.name"
                           loading="lazy"
                         />
+                        <div v-else-if="asset.type === 'hdri'" class="hdri-placeholder">
+                          <n-icon size="32" color="#1d1d1d">
+                            <component :is="currentCategory.icon" />
+                          </n-icon>
+                          <span class="hdri-label">HDRI环境贴图</span>
+                        </div>
                         <n-icon v-else size="32" color="#1d1d1d">
                           <component :is="currentCategory.icon" />
                         </n-icon>
@@ -1170,6 +1219,25 @@
     linear-gradient(-45deg, transparent 75%, #ddd 75%);
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+}
+
+.hdri-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
+}
+
+.hdri-label {
+  font-size: 10px;
+  color: #666;
+  text-align: center;
+  padding: 0 4px;
+  line-height: 1.2;
 }
 
 .asset-overlay {

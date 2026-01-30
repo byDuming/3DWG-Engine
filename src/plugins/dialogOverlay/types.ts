@@ -49,4 +49,3 @@ export type DialogOpenOptions = Omit<
   pin?: boolean
   visible?: boolean
 }
-

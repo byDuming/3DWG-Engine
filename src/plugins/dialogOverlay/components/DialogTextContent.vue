@@ -16,4 +16,3 @@ defineProps<{
   word-break: break-word;
 }
 </style>
-

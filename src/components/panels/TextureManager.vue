@@ -3,7 +3,7 @@
  * 贴图资产管理面板
  * 支持贴图上传、ZIP 压缩包批量导入、从资产库选择贴图
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useSceneStore } from '@/stores/modules/useScene.store'
 import { assetApi } from '@/services/assetApi'
 import { useMessage, useDialog, type UploadFileInfo } from 'naive-ui'
@@ -15,6 +15,7 @@ import {
   CloseCircleOutline,
   ChevronDownOutline,
   ChevronForwardOutline,
+  SunnyOutline,
 } from '@vicons/ionicons5'
 import { DeleteFilled } from '@vicons/material'
 import type { AssetRef } from '@/types/asset'
@@ -31,6 +32,8 @@ const props = defineProps<{
   selectMode?: boolean
   /** 选择模式下的目标槽位 */
   targetSlot?: TextureSlot
+  /** 资产类型：'texture' | 'hdri' | 'all' */
+  assetType?: 'texture' | 'hdri' | 'all'
 }>()
 
 const emit = defineEmits<{
@@ -82,8 +85,8 @@ function getTextureCategory(name: string): string {
 const filteredTextureAssets = computed(() => {
   let result = textureAssets.value
   
-  // 按分类过滤
-  if (selectedCategory.value !== 'all') {
+  // 按分类过滤（仅对texture类型有效）
+  if (props.assetType === 'texture' && selectedCategory.value !== 'all') {
     result = result.filter(asset => getTextureCategory(asset.name) === selectedCategory.value)
   }
   
@@ -96,8 +99,12 @@ const filteredTextureAssets = computed(() => {
   return result
 })
 
-// 各分类数量统计
+// 各分类数量统计（仅对texture类型有效）
 const categoryCounts = computed(() => {
+  if (props.assetType !== 'texture') {
+    return { all: textureAssets.value.length } as Record<string, number>
+  }
+  
   const counts: Record<string, number> = { all: textureAssets.value.length }
   
   for (const asset of textureAssets.value) {
@@ -153,13 +160,29 @@ async function loadTextureAssets() {
   }
   loading.value = true
   try {
-    textureAssets.value = await assetApi.getGlobalAssets('texture')
+    const assetType = props.assetType || 'texture'
+    if (assetType === 'hdri') {
+      textureAssets.value = await assetApi.getGlobalAssets('hdri')
+    } else if (assetType === 'all') {
+      const [textures, hdris] = await Promise.all([
+        assetApi.getGlobalAssets('texture'),
+        assetApi.getGlobalAssets('hdri')
+      ])
+      textureAssets.value = [...textures, ...hdris]
+    } else {
+      textureAssets.value = await assetApi.getGlobalAssets('texture')
+    }
   } catch (error) {
-    console.error('加载贴图列表失败:', error)
+    console.error('加载资产列表失败:', error)
   } finally {
     loading.value = false
   }
 }
+
+// 监听assetType变化，重新加载资产
+watch(() => props.assetType, () => {
+  loadTextureAssets()
+})
 
 onMounted(() => {
   loadTextureAssets()
@@ -354,6 +377,13 @@ async function handleDeleteFolder(folderKey: string) {
 function getTexturePreview(asset: AssetRef): string {
   return asset.thumbnail || asset.uri
 }
+
+// 判断是否为HDRI资产
+function isHDRI(asset: AssetRef): boolean {
+  return asset.type === 'hdri' || 
+         asset.name.toLowerCase().endsWith('.hdr') || 
+         asset.name.toLowerCase().endsWith('.exr')
+}
 </script>
 
 <template>
@@ -413,7 +443,7 @@ function getTexturePreview(asset: AssetRef): string {
       <!-- 搜索框 -->
       <n-input
         v-model:value="searchKeyword"
-        placeholder="搜索贴图..."
+        :placeholder="props.assetType === 'hdri' ? '搜索HDRI...' : props.assetType === 'all' ? '搜索资产...' : '搜索贴图...'"
         size="small"
         clearable
         class="search-input"
@@ -427,8 +457,8 @@ function getTexturePreview(asset: AssetRef): string {
         </template>
       </n-input>
       
-      <!-- 分类标签 -->
-      <div class="category-tabs">
+      <!-- 分类标签（仅texture类型显示） -->
+      <div v-if="props.assetType === 'texture' || !props.assetType" class="category-tabs">
         <button
           v-for="cat in TEXTURE_CATEGORIES"
           :key="cat.key"
@@ -484,10 +514,17 @@ function getTexturePreview(asset: AssetRef): string {
                   >
                     <div class="texture-preview">
                       <img
+                        v-if="!isHDRI(asset)"
                         :src="getTexturePreview(asset)"
                         :alt="asset.name"
                         loading="lazy"
                       />
+                      <div v-else class="hdri-placeholder">
+                        <n-icon size="32" color="#1d1d1d">
+                          <SunnyOutline />
+                        </n-icon>
+                        <span class="hdri-label">HDRI环境贴图</span>
+                      </div>
                       <div class="texture-overlay">
                         <n-button
                           v-if="selectMode"
@@ -963,5 +1000,24 @@ function getTexturePreview(asset: AssetRef): string {
   background: var(--n-color-embedded, #f5f5f5);
   border-radius: 4px;
   color: var(--n-text-color-3, #999);
+}
+
+.hdri-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
+}
+
+.hdri-label {
+  font-size: 10px;
+  color: #666;
+  text-align: center;
+  padding: 0 4px;
+  line-height: 1.2;
 }
 </style>

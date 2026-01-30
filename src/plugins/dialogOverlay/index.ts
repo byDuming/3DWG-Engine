@@ -1,25 +1,31 @@
 import { definePlugin } from '@/core'
 import { Vector3 } from 'three'
-import { worldToScreen } from '@/dialog/worldToScreen'
-import { closeDialog, listDialogs, openDialog, updateDialog } from '@/dialog/dialogStore'
-import type { DialogOpenOptions, DialogTarget } from '@/dialog/types'
-import DialogOverlayPanel from '@/components/panels/DialogOverlayPanel.vue'
+import { worldToScreen } from './utils/worldToScreen'
+import { closeDialog, listDialogs, openDialog, updateDialog } from './store'
+import type { DialogOpenOptions, DialogTarget } from './types'
+import DialogOverlayPanel from './components/DialogOverlayPanel.vue'
 import { ChatboxEllipsesOutline } from '@vicons/ionicons5'
 
 /**
- * DOM 弹窗 Overlay 插件（方式1：通过事件系统暴露 API）
+ * DOM 弹窗 Overlay 插件
  *
+ * 为 3D 场景提供常驻/跟随的 DOM 弹窗功能
+ * 
  * 事件：
  * - dialog:open (options, reply?) -> reply(id)
  * - dialog:close (id)
  * - dialog:update (id, patch)
  * - dialog:list (reply?) -> reply(dialogs)
  */
-export const dialogOverlayPlugin = definePlugin({
+const dialogOverlayPlugin = definePlugin({
   id: 'dialog-overlay',
   name: '弹窗 Overlay（DOM）',
   version: '0.1.0',
   description: '为 3D 场景提供常驻/跟随的 DOM 弹窗',
+  
+  // 默认启用此插件
+  defaultEnabled: true,
+  
   panels: [
     {
       id: 'dialog-overlay-panel',
@@ -97,3 +103,18 @@ export const dialogOverlayPlugin = definePlugin({
   }
 })
 
+// 默认导出插件（用于自动发现）
+export default dialogOverlayPlugin
+
+// 命名导出（保持向后兼容）
+export { dialogOverlayPlugin }
+
+// 导出组件（供外部使用）
+export { default as DialogOverlayHost } from './components/DialogOverlayHost.vue'
+export { default as DialogOverlayPanel } from './components/DialogOverlayPanel.vue'
+export { default as DialogTextContent } from './components/DialogTextContent.vue'
+
+// 导出类型和工具函数
+export * from './types'
+export * from './store'
+export { worldToScreen } from './utils/worldToScreen'

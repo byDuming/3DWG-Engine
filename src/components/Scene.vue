@@ -2,21 +2,28 @@
   import { onMounted, watch, watchEffect } from 'vue'
   import { useRenderer } from '@/composables/useRenderer'
   import { useSceneStore } from '@/stores/modules/useScene.store'
+  import { useLoadingStore } from '@/stores/modules/useLoading.store'
   import { sceneApi } from '@/services/sceneApi'
   import { useDialog, useNotification, useMessage } from 'naive-ui'
   import { pluginManager } from '@/core'
   import { useAnimationStore } from '@/stores/modules/useAnimation.store'
-  import { dialogOverlayPlugin } from '@/plugins/dialogOverlay.plugin'
+  import LoadingPage from './LoadingPage.vue'
+  import { collectAllTextureUrls, loadTextureWithProgress, loadHDRTextureWithProgress, extractFileName } from '@/utils/threeObjectFactory'
+  import type { SceneObjectData } from '@/interfaces/sceneInterface'
 
   /**
    * 3D 视图容器组件：
    * - 负责把 three.js 渲染 canvas 挂载到 DOM
    * - 初始化通知 / 对话框注入到 sceneStore
    * - 统一处理场景数据加载和切换
+   * - 显示场景加载进度
    * 
    * 场景切换流程：
-   * 1. 加载场景数据到 store (objectDataList, assets 等)
-   * 2. 调用 useRenderer.switchScene() 完成 three.js 层的切换
+   * 1. 显示加载页面
+   * 2. 加载场景数据到 store (objectDataList, assets 等)
+   * 3. 预扫描并注册所有需要加载的资源
+   * 4. 调用 useRenderer.switchScene() 完成 three.js 层的切换
+   * 5. 加载完成后隐藏加载页面
    */
 
   const props = defineProps<{
@@ -25,6 +32,7 @@
   }>()
 
   const sceneStore = useSceneStore()
+  const loadingStore = useLoadingStore()
   const animationStore = useAnimationStore()
   const message = useMessage()
   const { container, camera, init, switchScene, captureScreenshot } = useRenderer()
@@ -39,10 +47,129 @@
   })
 
   /**
+   * 收集场景中所有需要加载的资源
+   */
+  function collectResourcesToLoad(objectDataList: SceneObjectData[]): {
+    models: Array<{ id: string; name: string; assetId: string }>
+    textures: Set<string>
+    hdrTextures: Set<string>
+  } {
+    const models: Array<{ id: string; name: string; assetId: string }> = []
+    
+    // 收集模型资源
+    for (const obj of objectDataList) {
+      if ((obj.type === 'model' || obj.type === 'pointCloud') && obj.assetId) {
+        // 从资产列表获取名称
+        const asset = sceneStore.assets.find((a: any) => a.id === obj.assetId)
+        models.push({
+          id: obj.assetId,
+          name: asset?.name || obj.name || obj.id,
+          assetId: obj.assetId
+        })
+      }
+    }
+    
+    // 收集贴图资源
+    const { textures, hdrTextures } = collectAllTextureUrls(objectDataList)
+    
+    return { models, textures, hdrTextures }
+  }
+
+  /**
+   * 注册所有资源到加载管理器
+   */
+  function registerResources(resources: ReturnType<typeof collectResourcesToLoad>) {
+    const items: Array<{ id: string; name: string; type: 'model' | 'texture' | 'hdr' | 'pointcloud' }> = []
+    
+    // 注册模型
+    for (const model of resources.models) {
+      items.push({
+        id: `model_${model.assetId}`,
+        name: model.name,
+        type: 'model'
+      })
+    }
+    
+    // 注册普通贴图
+    for (const url of resources.textures) {
+      items.push({
+        id: `texture_${url}`,
+        name: extractFileName(url),
+        type: 'texture'
+      })
+    }
+    
+    // 注册HDR贴图
+    for (const url of resources.hdrTextures) {
+      items.push({
+        id: `hdr_${url}`,
+        name: extractFileName(url),
+        type: 'hdr'
+      })
+    }
+    
+    if (items.length > 0) {
+      loadingStore.registerResources(items)
+    }
+  }
+
+  /**
+   * 预加载贴图资源
+   */
+  async function preloadTextures(resources: ReturnType<typeof collectResourcesToLoad>) {
+    const promises: Promise<any>[] = []
+    
+    // 加载普通贴图
+    for (const url of resources.textures) {
+      const resourceId = `texture_${url}`
+      loadingStore.markResourceLoading(resourceId)
+      
+      const promise = loadTextureWithProgress(url, {
+        onProgress: (_, loaded, total) => {
+          loadingStore.updateProgress(resourceId, (loaded / total) * 100, loaded, total)
+        },
+        onComplete: () => {
+          loadingStore.markLoaded(resourceId)
+        },
+        onError: (_, error) => {
+          loadingStore.markError(resourceId, error)
+        }
+      })
+      promises.push(promise)
+    }
+    
+    // 加载HDR贴图
+    for (const url of resources.hdrTextures) {
+      const resourceId = `hdr_${url}`
+      loadingStore.markResourceLoading(resourceId)
+      
+      const promise = loadHDRTextureWithProgress(url, {
+        onProgress: (_, loaded, total) => {
+          loadingStore.updateProgress(resourceId, (loaded / total) * 100, loaded, total)
+        },
+        onComplete: () => {
+          loadingStore.markLoaded(resourceId)
+        },
+        onError: (_, error) => {
+          loadingStore.markError(resourceId, error)
+        }
+      })
+      promises.push(promise)
+    }
+    
+    // 等待所有贴图加载完成
+    if (promises.length > 0) {
+      await Promise.allSettled(promises)
+    }
+  }
+
+  /**
    * 加载场景数据到 store（不涉及 three.js 层）
    */
   async function loadSceneData(id: number): Promise<boolean> {
     try {
+      loadingStore.setPhase('正在获取场景数据...')
+      
       const sceneData = await sceneApi.getSceneById(id)
       if (!sceneData || !sceneData.id) {
         message.warning('场景不存在')
@@ -78,7 +205,6 @@
       sceneStore.historyManager.clear()
       sceneStore.isSceneReady = true
 
-      message.success('场景加载成功')
       return true
     } catch (error) {
       console.error('加载场景失败:', error)
@@ -91,6 +217,8 @@
    * 加载默认场景数据
    */
   async function loadDefaultScene() {
+    loadingStore.setPhase('正在加载本地场景...')
+    
     // 清理旧数据
     sceneStore.objectsMap.clear()
     sceneStore.objectDataList = []
@@ -108,22 +236,75 @@
 
   /**
    * 完整的场景切换流程
+   * 
+   * 加载顺序：
+   * 1. 拉取场景数据
+   * 2. 加载贴图
+   * 3. 加载模型
+   * 4. 显示场景
    */
   async function doSwitchScene(sceneId: number | null | undefined) {
-    if (sceneId) {
-      const loaded = await loadSceneData(sceneId)
-      if (!loaded) {
+    // 开始加载流程
+    loadingStore.startLoading(true)
+    
+    try {
+      // 1. 拉取场景数据
+      loadingStore.setPhase('正在获取场景数据...')
+      loadingStore.markSceneDataLoading()
+      if (sceneId) {
+        const loaded = await loadSceneData(sceneId)
+        if (!loaded) {
+          await loadDefaultScene()
+        }
+      } else {
         await loadDefaultScene()
       }
-    } else {
-      await loadDefaultScene()
+      loadingStore.markSceneDataLoaded()
+      
+      // 2. 分析并注册所有需要加载的资源
+      const resources = collectResourcesToLoad(sceneStore.objectDataList)
+      const totalResources = resources.models.length + resources.textures.size + resources.hdrTextures.size
+      console.log(`[Scene] 需要加载的资源: ${resources.models.length} 个模型, ${resources.textures.size} 个贴图, ${resources.hdrTextures.size} 个HDR`)
+      
+      if (totalResources > 0) {
+        registerResources(resources)
+      }
+      
+      // 3. 加载贴图
+      const hasTextures = resources.textures.size > 0 || resources.hdrTextures.size > 0
+      if (hasTextures) {
+        loadingStore.setPhase('正在加载贴图...')
+        await preloadTextures(resources)
+      }
+      
+      // 4. 加载模型（通过 switchScene 触发）
+      if (resources.models.length > 0) {
+        loadingStore.setPhase('正在加载模型...')
+      } else {
+        loadingStore.setPhase('正在初始化场景...')
+      }
+      await switchScene()
+      
+      // 5. 加载完成
+      loadingStore.setPhase('加载完成')
+      loadingStore.finishLoading(300)
+      message.success('场景加载成功')
+      
+      // 场景切换和资产加载完成后，检查是否有自动播放的剪辑
+      handleAutoPlayClips()
+      
+    } catch (error) {
+      console.error('[Scene] 场景加载失败:', error)
+      loadingStore.setPhase('加载失败')
+      loadingStore.finishLoading(1000)
+      message.error('场景加载失败')
     }
-    
-    // 通知 useRenderer 切换场景（创建新的 three.js 场景并同步所有对象）
-    // 现在会等待所有网络资产加载完成
-    await switchScene()
-    
-    // 场景切换和资产加载完成后，检查是否有自动播放的剪辑
+  }
+  
+  /**
+   * 处理自动播放剪辑
+   */
+  async function handleAutoPlayClips() {
     const { useAnimationStore } = await import('@/stores/modules/useAnimation.store')
     const animationStore = useAnimationStore()
     
@@ -223,8 +404,8 @@
         { scene: sceneStore.threeScene as any, camera: camera.value as any, renderer: sceneStore.renderer as any }
       )
       pluginManager.setContext(ctx)
-      // 安装弹窗插件
-      await pluginManager.register(dialogOverlayPlugin)
+      // 自动加载所有已启用的插件
+      await pluginManager.loadEnabledPlugins()
     }
     
     // 设置截图函数到 store
@@ -236,12 +417,16 @@
 </script>
 
 <template>
-  <div id="mainContainer" ref="container"></div>
+  <div id="mainContainer" ref="container">
+    <!-- 场景加载页面 -->
+    <LoadingPage />
+  </div>
 </template>
 
 <style scoped>
   #mainContainer {
     width: 100%;
     height: 100%;
+    position: relative;
   }
 </style>

@@ -4,7 +4,6 @@ import { usePluginManager } from '@/core'
 import { useSceneStore } from '@/stores/modules/useScene.store'
 import { 
   ExtensionPuzzleOutline, 
-  TrashOutline, 
   InformationCircleOutline,
   CubeOutline,
   GridOutline,
@@ -12,28 +11,29 @@ import {
   FlashOutline,
   HammerOutline,
   CheckmarkCircleOutline,
-  CloseCircleOutline
+  CloseCircleOutline,
+  SettingsOutline
 } from '@vicons/ionicons5'
 
-const { manager, plugins } = usePluginManager()
+const { manager, availablePlugins, plugins } = usePluginManager()
 const sceneStore = useSceneStore()
 
 // 当前选中的插件
 const selectedPluginId = ref<string | null>(null)
 
-// 展开的插件ID列表
-const expandedPluginIds = ref<Set<string>>(new Set())
-
 // 搜索关键词
 const searchKeyword = ref('')
 
-// 过滤后的插件列表
+// 正在切换状态的插件ID
+const togglingPluginIds = ref<Set<string>>(new Set())
+
+// 过滤后的可用插件列表
 const filteredPlugins = computed(() => {
   if (!searchKeyword.value.trim()) {
-    return plugins.value
+    return availablePlugins.value
   }
   const keyword = searchKeyword.value.toLowerCase()
-  return plugins.value.filter(plugin => 
+  return availablePlugins.value.filter(plugin => 
     plugin.name.toLowerCase().includes(keyword) ||
     plugin.id.toLowerCase().includes(keyword) ||
     plugin.description?.toLowerCase().includes(keyword) ||
@@ -44,13 +44,34 @@ const filteredPlugins = computed(() => {
 // 当前选中的插件详情
 const selectedPlugin = computed(() => {
   if (!selectedPluginId.value) return null
-  return plugins.value.find(p => p.id === selectedPluginId.value) || null
+  return availablePlugins.value.find(p => p.id === selectedPluginId.value) || null
 })
+
+// 检查插件是否已启用
+function isPluginEnabled(pluginId: string): boolean {
+  return manager.isEnabled(pluginId)
+}
+
+// 检查插件是否正在切换状态
+function isToggling(pluginId: string): boolean {
+  return togglingPluginIds.value.has(pluginId)
+}
 
 // 获取插件注册的扩展数量
 function getPluginExtensions(pluginId: string) {
   const plugin = manager.getPlugin(pluginId)
-  if (!plugin) return { objectTypes: 0, panels: 0, menuItems: 0, shortcuts: 0, toolbarItems: 0 }
+  if (!plugin) {
+    // 如果插件未安装，从可用插件中获取
+    const available = manager.getAvailablePlugins().find(p => p.id === pluginId)
+    if (!available) return { objectTypes: 0, panels: 0, menuItems: 0, shortcuts: 0, toolbarItems: 0 }
+    return {
+      objectTypes: available.objectTypes?.length || 0,
+      panels: available.panels?.length || 0,
+      menuItems: available.menuItems?.length || 0,
+      shortcuts: available.shortcuts?.length || 0,
+      toolbarItems: available.toolbarItems?.length || 0
+    }
+  }
   
   return {
     objectTypes: plugin.objectTypes?.length || 0,
@@ -61,49 +82,50 @@ function getPluginExtensions(pluginId: string) {
   }
 }
 
-// 卸载插件
-async function handleUninstall(pluginId: string) {
-  const plugin = plugins.value.find(p => p.id === pluginId)
-  if (!plugin) return
+// 切换插件启用状态
+async function handleTogglePlugin(pluginId: string) {
+  if (togglingPluginIds.value.has(pluginId)) return
   
-  const confirmed = await new Promise<boolean>((resolve) => {
-    if (sceneStore.dialogProvider) {
-      sceneStore.dialogProvider.warning({
-        title: '确认卸载',
-        content: `确定要卸载插件 "${plugin.name}" 吗？\n\n此操作将移除该插件注册的所有扩展（对象类型、面板、菜单项等）。`,
-        positiveText: '确认',
-        negativeText: '取消',
-        onPositiveClick: () => resolve(true),
-        onNegativeClick: () => resolve(false),
-        onClose: () => resolve(false)
-      })
-    } else {
-      resolve(window.confirm(
-        `确定要卸载插件 "${plugin.name}" 吗？\n\n` +
-        `此操作将移除该插件注册的所有扩展（对象类型、面板、菜单项等）。`
-      ))
-    }
-  })
+  togglingPluginIds.value.add(pluginId)
   
-  if (confirmed) {
-    const success = manager.unregister(pluginId)
-    if (success) {
-      if (selectedPluginId.value === pluginId) {
-        selectedPluginId.value = null
+  try {
+    const isEnabled = manager.isEnabled(pluginId)
+    
+    if (isEnabled) {
+      // 禁用插件
+      const success = manager.disable(pluginId)
+      if (success) {
+        sceneStore.notification?.success({
+          title: '插件已禁用',
+          content: `插件已禁用，刷新页面后生效`,
+          duration: 2000
+        })
+      } else {
+        sceneStore.notification?.error({
+          title: '禁用失败',
+          content: `无法禁用插件，可能被其他插件依赖`,
+          duration: 3000
+        })
       }
-      expandedPluginIds.value.delete(pluginId)
-      sceneStore.notification?.success({
-        title: '卸载成功',
-        content: `插件 "${plugin.name}" 已卸载`,
-        duration: 2000
-      })
     } else {
-      sceneStore.notification?.error({
-        title: '卸载失败',
-        content: `无法卸载插件 "${plugin.name}"，可能被其他插件依赖`,
-        duration: 3000
-      })
+      // 启用插件
+      const success = await manager.enable(pluginId)
+      if (success) {
+        sceneStore.notification?.success({
+          title: '插件已启用',
+          content: `插件已启用并加载`,
+          duration: 2000
+        })
+      } else {
+        sceneStore.notification?.error({
+          title: '启用失败',
+          content: `无法启用插件`,
+          duration: 3000
+        })
+      }
     }
+  } finally {
+    togglingPluginIds.value.delete(pluginId)
   }
 }
 
@@ -114,24 +136,31 @@ function formatVersion(version: string) {
 
 // 检查插件是否有依赖
 function hasDependencies(pluginId: string): boolean {
-  const plugin = manager.getPlugin(pluginId)
+  const plugin = manager.getPlugin(pluginId) || 
+    manager.getAvailablePlugins().find(p => p.id === pluginId)
   return !!(plugin?.dependencies && plugin.dependencies.length > 0)
 }
 
 // 获取插件的依赖列表
 function getDependencies(pluginId: string): string[] {
-  const plugin = manager.getPlugin(pluginId)
+  const plugin = manager.getPlugin(pluginId) || 
+    manager.getAvailablePlugins().find(p => p.id === pluginId)
   return plugin?.dependencies || []
 }
 
-// 切换插件选中状态（点击已选中的插件时收起详情）
+// 切换插件选中状态
 function togglePluginSelection(pluginId: string) {
   if (selectedPluginId.value === pluginId) {
-    selectedPluginId.value = null // 收起详情
+    selectedPluginId.value = null
   } else {
-    selectedPluginId.value = pluginId // 展开详情
+    selectedPluginId.value = pluginId
   }
 }
+
+// 获取已启用的插件数量
+const enabledCount = computed(() => {
+  return availablePlugins.value.filter(p => manager.isEnabled(p.id)).length
+})
 </script>
 
 <template>
@@ -144,7 +173,7 @@ function togglePluginSelection(pluginId: string) {
         插件管理
       </h3>
       <div class="plugin-count">
-        已安装 {{ plugins.length }} 个插件
+        共 {{ availablePlugins.length }} 个插件，已启用 {{ enabledCount }} 个
       </div>
     </div>
 
@@ -175,7 +204,10 @@ function togglePluginSelection(pluginId: string) {
         v-for="plugin in filteredPlugins"
         :key="plugin.id"
         class="plugin-item"
-        :class="{ 'plugin-item-selected': selectedPluginId === plugin.id }"
+        :class="{ 
+          'plugin-item-selected': selectedPluginId === plugin.id,
+          'plugin-item-disabled': !isPluginEnabled(plugin.id)
+        }"
         @click="togglePluginSelection(plugin.id)"
       >
         <div class="plugin-item-header">
@@ -185,23 +217,27 @@ function togglePluginSelection(pluginId: string) {
               <n-tag :bordered="false" size="small" type="info" style="margin-left: 8px;">
                 {{ formatVersion(plugin.version) }}
               </n-tag>
+              <n-tag 
+                v-if="isPluginEnabled(plugin.id)" 
+                :bordered="false" 
+                size="small" 
+                type="success" 
+                style="margin-left: 4px;"
+              >
+                已启用
+              </n-tag>
             </div>
             <div class="plugin-id">{{ plugin.id }}</div>
             <div v-if="plugin.description" class="plugin-description">
               {{ plugin.description }}
             </div>
           </div>
-          <div class="plugin-actions">
-            <n-button
-              size="small"
-              type="error"
-              quaternary
-              @click.stop="handleUninstall(plugin.id)"
-            >
-              <template #icon>
-                <n-icon><TrashOutline /></n-icon>
-              </template>
-            </n-button>
+          <div class="plugin-actions" @click.stop>
+            <n-switch
+              :value="isPluginEnabled(plugin.id)"
+              :loading="isToggling(plugin.id)"
+              @update:value="() => handleTogglePlugin(plugin.id)"
+            />
           </div>
         </div>
 
@@ -271,6 +307,11 @@ function togglePluginSelection(pluginId: string) {
           <n-descriptions-item label="版本">
             <n-tag type="info">{{ formatVersion(selectedPlugin.version) }}</n-tag>
           </n-descriptions-item>
+          <n-descriptions-item label="状态">
+            <n-tag :type="isPluginEnabled(selectedPlugin.id) ? 'success' : 'default'">
+              {{ isPluginEnabled(selectedPlugin.id) ? '已启用' : '未启用' }}
+            </n-tag>
+          </n-descriptions-item>
           <n-descriptions-item v-if="selectedPlugin.description" label="描述">
             {{ selectedPlugin.description }}
           </n-descriptions-item>
@@ -338,7 +379,6 @@ function togglePluginSelection(pluginId: string) {
 .plugin-manager-panel {
   padding: 16px;
   height: 100%;
-  /* overflow-y: auto; */
 }
 
 .panel-header {
@@ -381,6 +421,10 @@ function togglePluginSelection(pluginId: string) {
 .plugin-item-selected {
   border-color: var(--n-primary-color, #409eff);
   background: var(--n-primary-color-hover, #ecf5ff);
+}
+
+.plugin-item-disabled {
+  opacity: 0.7;
 }
 
 .plugin-item-header {

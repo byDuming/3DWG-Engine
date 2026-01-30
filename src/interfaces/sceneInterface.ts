@@ -15,8 +15,10 @@ export interface SceneSettings {
   backgroundColor?: string;
   backgroundTexture?: string;
   backgroundCube?: string[];
+  backgroundIntensity?: number; // 背景贴图强度/曝光（0-10，默认1）
   environmentType?: SceneEnvironmentType;
   environmentMap?: string | string[];
+  environmentIntensity?: number; // 环境贴图强度/曝光（0-10，默认1）
   fog?: {
     type?: SceneFogType;
     color?: string;

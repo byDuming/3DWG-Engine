@@ -34,6 +34,9 @@ import { AddObjectCommand, RemoveObjectCommand, UpdateTransformCommand, UpdateOb
 import { useSceneAssetStore } from './useSceneAsset.store'
 import { useSceneSelectionStore } from './useSceneSelection.store'
 import { useSceneHistoryStore, type SceneSnapshot } from './useSceneHistory.store'
+import { useAuthStore } from './useAuth.store'
+import { useLoadingStore } from './useLoading.store'
+import type { GLTF } from 'three/addons/loaders/GLTFLoader.js'
 
 
 export const useSceneStore = defineStore('scene', () => {
@@ -219,6 +222,8 @@ export const useSceneStore = defineStore('scene', () => {
     }
     
     const objectData = objectDataList.value.find(d => d.id === objectId)
+    const loadingStore = useLoadingStore()
+    const resourceId = `model_${assetId}`
     
     // 如果资产已经在加载中，等待加载完成
     const existingPromise = assetStore.getAssetLoadPromise(assetId)
@@ -232,6 +237,10 @@ export const useSceneStore = defineStore('scene', () => {
         if (objectData && (objectData.castShadow || objectData.receiveShadow)) {
           applyShadowRecursively(target, objectData.castShadow, objectData.receiveShadow)
         }
+      }
+      // 如果在初始加载模式，标记完成
+      if (loadingStore.isInitialLoading) {
+        loadingStore.markLoaded(resourceId)
       }
       return
     }
@@ -253,15 +262,40 @@ export const useSceneStore = defineStore('scene', () => {
     // 创建加载Promise
     const loadPromise = (async () => {
       assetStore.markAssetLoading(assetId)
+      
+      // 如果在初始加载模式，标记开始加载
+      if (loadingStore.isInitialLoading) {
+        loadingStore.markResourceLoading(resourceId)
+      }
+      
       let resolved: { url: string; revoke?: () => void } | null = null
       try {
         resolved = await resolveAssetUri(asset)
         if (!resolved) {
           console.warn('Model asset has no valid URI:', asset.name)
+          if (loadingStore.isInitialLoading) {
+            loadingStore.markError(resourceId, '无效的资产URI')
+          }
           return
         }
+        
         const loader = new GLTFLoader()
-        const gltf = await loader.loadAsync(resolved.url)
+        
+        // 使用带进度回调的加载方式
+        const gltf = await new Promise<GLTF>((resolve, reject) => {
+          loader.load(
+            resolved!.url,
+            (gltf) => resolve(gltf),
+            (event) => {
+              // 进度回调
+              if (loadingStore.isInitialLoading && event.lengthComputable) {
+                const progress = (event.loaded / event.total) * 100
+                loadingStore.updateProgress(resourceId, progress, event.loaded, event.total)
+              }
+            },
+            (error) => reject(error)
+          )
+        })
         
         if (gltf.scene) {
           ensureUV2ForModel(gltf.scene)
@@ -275,10 +309,22 @@ export const useSceneStore = defineStore('scene', () => {
         }
         
         assetStore.markAssetLoaded(assetId)
+        
+        // 标记加载完成
+        if (loadingStore.isInitialLoading) {
+          loadingStore.markLoaded(resourceId)
+        }
+        
         console.log(`[loadModelAssetIntoObject] 资产加载完成: ${asset.name} (${assetId})`)
       } catch (error) {
         console.error(`[loadModelAssetIntoObject] 加载资产失败: ${asset.name} (${assetId})`, error)
         assetStore.markAssetFailed(assetId)
+        
+        // 标记加载失败
+        if (loadingStore.isInitialLoading) {
+          loadingStore.markError(resourceId, (error as Error)?.message || '加载失败')
+        }
+        
         throw error
       } finally {
         resolved?.revoke?.()
@@ -304,6 +350,9 @@ export const useSceneStore = defineStore('scene', () => {
       return
     }
 
+    const loadingStore = useLoadingStore()
+    const resourceId = `pointcloud_${assetId}`
+
     // 如果资产已经在加载中，等待加载完成
     const existingPromise = assetStore.getAssetLoadPromise(assetId)
     if (existingPromise) {
@@ -312,6 +361,9 @@ export const useSceneStore = defineStore('scene', () => {
       if (cached) {
         target.children.slice().forEach(child => target.remove(child))
         target.add(cached.clone(true))
+      }
+      if (loadingStore.isInitialLoading) {
+        loadingStore.markLoaded(resourceId)
       }
       return
     }
@@ -329,26 +381,58 @@ export const useSceneStore = defineStore('scene', () => {
     // 创建加载 Promise
     const loadPromise = (async () => {
       assetStore.markAssetLoading(assetId)
+      
+      if (loadingStore.isInitialLoading) {
+        loadingStore.markResourceLoading(resourceId)
+      }
+      
       let resolved: { url: string; revoke?: () => void } | null = null
       try {
         resolved = await resolveAssetUri(asset)
         if (!resolved) {
           console.warn('Point cloud asset has no valid URI:', asset.name)
+          if (loadingStore.isInitialLoading) {
+            loadingStore.markError(resourceId, '无效的资产URI')
+          }
           return
         }
         const { PCDLoader } = await import('three/addons/loaders/PCDLoader.js')
         const loader = new PCDLoader()
-        const points = await loader.loadAsync(resolved.url)
+        
+        // 使用带进度回调的加载方式
+        const points = await new Promise<any>((resolve, reject) => {
+          loader.load(
+            resolved!.url,
+            (points) => resolve(points),
+            (event) => {
+              if (loadingStore.isInitialLoading && event.lengthComputable) {
+                const progress = (event.loaded / event.total) * 100
+                loadingStore.updateProgress(resourceId, progress, event.loaded, event.total)
+              }
+            },
+            (error) => reject(error)
+          )
+        })
 
         assetStore.cacheAssetScene(assetId, points)
         target.children.slice().forEach(child => target.remove(child))
         target.add(points.clone(true))
 
         assetStore.markAssetLoaded(assetId)
+        
+        if (loadingStore.isInitialLoading) {
+          loadingStore.markLoaded(resourceId)
+        }
+        
         console.log(`[loadPointCloudAssetIntoObject] 点云加载完成: ${asset.name} (${assetId})`)
       } catch (error) {
         console.error(`[loadPointCloudAssetIntoObject] 加载点云失败: ${asset.name} (${assetId})`, error)
         assetStore.markAssetFailed(assetId)
+        
+        if (loadingStore.isInitialLoading) {
+          loadingStore.markError(resourceId, (error as Error)?.message || '加载失败')
+        }
+        
         throw error
       } finally {
         resolved?.revoke?.()
@@ -543,7 +627,7 @@ export const useSceneStore = defineStore('scene', () => {
 
     const sceneData = objectDataList.value.find(item => item.type === 'scene')
     if (sceneData && threeScene.value) {
-      applySceneSettings(threeScene.value, sceneData)
+      await applySceneSettings(threeScene.value, sceneData)
     }
 
     if (modelLoadPromises.length > 0) {
@@ -722,7 +806,7 @@ export const useSceneStore = defineStore('scene', () => {
     if (patch.renderOrder !== undefined) obj.renderOrder = patch.renderOrder
   }
 
-  function updateSceneObjectData(id: string, patch: Partial<SceneObjectData>, options?: { skipHistory?: boolean }) {
+  async function updateSceneObjectData(id: string, patch: Partial<SceneObjectData>, options?: { skipHistory?: boolean }) {
     const target = objectDataList.value.find(item => item.id === id)
     if (!target) return null
 
@@ -803,8 +887,12 @@ export const useSceneStore = defineStore('scene', () => {
     }
 
     if (nextData.type === 'scene' && threeScene.value) {
-      const fn = () => applySceneSettings(threeScene.value!, nextData)
-      isCritical ? fn() : setTimeout(fn, 0)
+      const fn = async () => await applySceneSettings(threeScene.value!, nextData)
+      if (isCritical) {
+        await fn()
+      } else {
+        setTimeout(() => { void fn() }, 0)
+      }
     }
     if (nextData.type === 'camera') {
       const cameraObj = objectsMap.value.get(id)
@@ -950,6 +1038,17 @@ export const useSceneStore = defineStore('scene', () => {
   }
 
   async function saveScene(sceneId?: number) {
+    // 权限检查
+    const authStore = useAuthStore()
+    if (!authStore.isLoggedIn) {
+      authStore.showLoginDialog = true
+      notification.value?.warning({
+        content: '请先登录后再保存',
+        duration: 2500
+      })
+      return
+    }
+    
     const targetId = sceneId ?? currentSceneId.value
     if (!targetId) {
       notification.value?.error({

@@ -12,11 +12,14 @@
   import BottomAssetPanel from '@/components/BottomAssetPanel.vue'
   // 数值输入控件
   import NumberInput from '@/components/panels/NumberInput.vue'
-  import DialogOverlayHost from '@/dialog/DialogOverlayHost.vue'
+  import { DialogOverlayHost } from '@/plugins/dialogOverlay'
   // 性能面板
   import StatsPanel from '@/components/panels/StatsPanel.vue'
+  // 权限检查
+  import { useAuthGuard } from '@/composables/useAuthGuard'
   
   const sceneStore = useSceneStore()
+  const { requireAuth } = useAuthGuard()
 
   const route = useRoute()
   const router = useRouter()
@@ -43,7 +46,12 @@
   })
 
   // 从预览模式切换到编辑模式
-  function enterEditMode() {
+  async function enterEditMode() {
+    // 权限检查
+    if (!await requireAuth()) {
+      return
+    }
+    
     router.replace({
       path: '/engine',
       query: {
@@ -95,8 +103,23 @@
     }
   }
 
-  onMounted(() => {
+  onMounted(async () => {
     window.addEventListener('keydown', handleKeyDown)
+    
+    // 如果直接通过 URL 访问编辑模式，检查权限
+    if (isEditMode.value) {
+      const authorized = await requireAuth()
+      if (!authorized) {
+        // 未登录则切换到预览模式
+        router.replace({
+          path: '/engine',
+          query: {
+            sceneId: sceneId.value,
+            mode: 'preview'
+          }
+        })
+      }
+    }
   })
 
   onBeforeUnmount(() => {

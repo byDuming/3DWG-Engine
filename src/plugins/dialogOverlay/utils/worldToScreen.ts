@@ -25,4 +25,3 @@ export function worldToScreen(
 
   return { x, y, z: ndc.z, inFrustum }
 }
-

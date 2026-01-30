@@ -1,14 +1,24 @@
 <script setup lang="ts">
-  import { computed, reactive } from 'vue'
+  import { computed, reactive, ref } from 'vue'
   import type { UploadFileInfo } from 'naive-ui'
+  import { useMessage } from 'naive-ui'
   import { useSceneStore } from '@/stores/modules/useScene.store'
   import type { SceneSettings } from '@/interfaces/sceneInterface'
+  import TextureManager from './TextureManager.vue'
+  import type { AssetRef } from '@/types/asset'
+  import { PropertyNumber } from './properties'
 
   const sceneStore = useSceneStore()
+  const message = useMessage()
   const sceneSettings = computed(() => sceneStore.selectedObjectData?.scene as SceneSettings | undefined)
 
   const uploadFileLists = reactive<Record<string, UploadFileInfo[]>>({})
   const fileNames = reactive<Record<string, string>>({})
+
+  // 资产选择器状态
+  const showAssetPicker = ref(false)
+  const pickerType = ref<'background' | 'environment'>('background')
+  const pickerAssetType = ref<'texture' | 'hdri' | 'all'>('all')
 
   const backgroundTypeOptions = [
     { label: '无', value: 'none' },
@@ -127,6 +137,82 @@
     if (!value) return false
     return value.startsWith('data:') || value.startsWith('blob:') || value.startsWith('http')
   }
+
+  // 打开资产选择器
+  function openAssetPicker(type: 'background' | 'environment') {
+    pickerType.value = type
+    if (type === 'background') {
+      // 背景贴图：显示所有类型（贴图和HDRI都可以）
+      pickerAssetType.value = 'all'
+    } else {
+      // 环境贴图：根据当前环境类型决定
+      const envType = sceneSettings.value?.environmentType
+      if (envType === 'hdr') {
+        pickerAssetType.value = 'hdri'
+      } else if (envType === 'equirect') {
+        pickerAssetType.value = 'texture'
+      } else {
+        pickerAssetType.value = 'all'
+      }
+    }
+    showAssetPicker.value = true
+  }
+
+  // 处理资产选择
+  function handleAssetSelect(asset: AssetRef) {
+    if (pickerType.value === 'background') {
+      // 判断是否为HDR文件
+      const isHdr = asset.type === 'hdri' || 
+                    asset.name.toLowerCase().endsWith('.hdr') || 
+                    asset.name.toLowerCase().endsWith('.exr')
+      
+      updateSceneSettings({
+        backgroundType: 'texture',
+        backgroundTexture: asset.uri
+      })
+      
+      // 更新文件名显示
+      fileNames.background = asset.name
+    } else if (pickerType.value === 'environment') {
+      const currentType = sceneSettings.value?.environmentType
+      const isHdr = asset.type === 'hdri' || 
+                    asset.name.toLowerCase().endsWith('.hdr') || 
+                    asset.name.toLowerCase().endsWith('.exr')
+      
+      if (currentType === 'hdr' || isHdr) {
+        // HDR类型：只接受HDRI资产
+        updateSceneSettings({
+          environmentType: 'hdr',
+          environmentMap: asset.uri
+        })
+      } else if (currentType === 'equirect' || !isHdr) {
+        // 全景类型：接受普通贴图资产
+        updateSceneSettings({
+          environmentType: 'equirect',
+          environmentMap: asset.uri
+        })
+      }
+      
+      // 更新文件名显示
+      fileNames.environment = asset.name
+    }
+    
+    sceneStore.registerRemoteAsset(asset)
+    showAssetPicker.value = false
+    message.success(`已应用 "${asset.name}"`)
+  }
+
+  // 清除背景贴图时也清除文件名
+  function clearBackgroundTexture() {
+    updateSceneSettings({ backgroundTexture: undefined })
+    fileNames.background = ''
+  }
+
+  // 清除环境贴图时也清除文件名
+  function clearEnvironmentMap() {
+    updateSceneSettings({ environmentMap: undefined })
+    fileNames.environment = ''
+  }
 </script>
 
 <template>
@@ -162,15 +248,17 @@
         <n-gi class="gid-item" :span="3">背景贴图</n-gi>
         <n-gi class="gid-item" :span="7">
           <div class="texture-row">
-            <n-upload
-              :default-upload="false"
-              :show-file-list="false"
-              accept="image/*"
-              :file-list="uploadFileLists.background"
-              @update:file-list="(files: UploadFileInfo[]) => handleBackgroundFiles(files)"
+            <n-button size="small" class="texture-button" @click="openAssetPicker('background')">
+              {{ getLabel('background', '从资产库选择') }}
+            </n-button>
+            <n-button 
+              v-if="sceneSettings?.backgroundTexture"
+              size="small" 
+              quaternary
+              @click="clearBackgroundTexture"
             >
-              <n-button size="small" class="texture-button">{{ getLabel('background', '选择贴图') }}</n-button>
-            </n-upload>
+              清除
+            </n-button>
             <n-image
               v-if="isPreviewableTexture(sceneSettings?.backgroundTexture)"
               :src="sceneSettings?.backgroundTexture"
@@ -179,7 +267,17 @@
               :img-props="{ class: 'texture-preview-thumb' }"
               alt="背景贴图预览"
             />
+            <span v-if="fileNames.background && !isPreviewableTexture(sceneSettings?.backgroundTexture)" class="texture-name-display">
+              {{ fileNames.background }}
+            </span>
           </div>
+        </n-gi>
+      </n-grid>
+      <!-- 背景强度/曝光控制 -->
+      <n-grid v-if="sceneSettings?.backgroundType === 'texture' || sceneSettings?.backgroundType === 'cube'" x-gap="6" :cols="10">
+        <n-gi class="gid-item" :span="3">背景强度</n-gi>
+        <n-gi class="gid-item" :span="7">
+          <PropertyNumber path="scene.backgroundIntensity" :default-value="1" :step="0.01" :min="0" :max="10" />
         </n-gi>
       </n-grid>
 
@@ -225,15 +323,59 @@
         </n-gi>
       </n-grid>
 
-      <n-grid v-if="sceneSettings?.environmentType && sceneSettings?.environmentType !== 'none'" x-gap="6" :cols="10">
+      <n-grid v-if="sceneSettings?.environmentType && sceneSettings?.environmentType !== 'none' && sceneSettings?.environmentType !== 'cube'" x-gap="6" :cols="10">
+        <n-gi class="gid-item" :span="3">环境贴图</n-gi>
+        <n-gi class="gid-item" :span="7">
+          <div class="texture-row">
+            <n-button 
+              size="small" 
+              class="texture-button" 
+              @click="openAssetPicker('environment')"
+            >
+              {{ sceneSettings?.environmentType === 'hdr' ? '从资产库选择HDRI' : '从资产库选择贴图' }}
+            </n-button>
+            <n-button 
+              v-if="sceneSettings?.environmentMap"
+              size="small" 
+              quaternary
+              @click="clearEnvironmentMap"
+            >
+              清除
+            </n-button>
+            <n-image
+              v-if="sceneSettings?.environmentType === 'equirect' && isPreviewableTexture(sceneSettings?.environmentMap as string)"
+              :src="sceneSettings?.environmentMap as string"
+              :preview-disabled="true"
+              class="texture-preview-container"
+              :img-props="{ class: 'texture-preview-thumb' }"
+              alt="环境贴图预览"
+            />
+            <span v-if="fileNames.environment && sceneSettings?.environmentType === 'hdr'" class="texture-name-display">
+              {{ fileNames.environment }}
+            </span>
+          </div>
+          <div v-if="sceneSettings?.environmentType === 'hdr'" class="texture-meta">HDR环境贴图（无预览）</div>
+        </n-gi>
+      </n-grid>
+
+      <!-- 环境贴图强度/曝光控制 -->
+      <n-grid v-if="sceneSettings?.environmentType && sceneSettings?.environmentType !== 'none' && sceneSettings?.environmentType !== 'cube'" x-gap="6" :cols="10">
+        <n-gi class="gid-item" :span="3">环境强度</n-gi>
+        <n-gi class="gid-item" :span="7">
+          <PropertyNumber path="scene.environmentIntensity" :default-value="1" :step="0.01" :min="0" :max="10" />
+        </n-gi>
+      </n-grid>
+
+      <!-- 天空盒环境贴图（保持原有上传方式） -->
+      <n-grid v-if="sceneSettings?.environmentType === 'cube'" x-gap="6" :cols="10">
         <n-gi class="gid-item" :span="3">环境贴图</n-gi>
         <n-gi class="gid-item" :span="7">
           <div class="texture-row">
             <n-upload
               :default-upload="false"
               :show-file-list="false"
-              :accept="sceneSettings?.environmentType === 'hdr' ? 'image/*,.hdr' : 'image/*'"
-              :multiple="sceneSettings?.environmentType === 'cube'"
+              accept="image/*"
+              multiple
               :file-list="uploadFileLists.environment"
               @update:file-list="(files: UploadFileInfo[]) => handleEnvironmentFiles(files)"
             >
@@ -251,16 +393,7 @@
                 />
               </div>
             </n-image-group>
-            <n-image
-              v-else-if="isPreviewableTexture(sceneSettings?.environmentMap as string)"
-              :src="sceneSettings?.environmentMap as string"
-              :preview-disabled="true"
-              class="texture-preview-container"
-              :img-props="{ class: 'texture-preview-thumb' }"
-              alt="环境贴图预览"
-            />
           </div>
-          <div v-if="sceneSettings?.environmentType === 'hdr'" class="texture-meta">HDR环境贴图（无预览）</div>
         </n-gi>
       </n-grid>
 
@@ -306,6 +439,21 @@
       </n-grid>
     </n-flex>
   </n-scrollbar>
+
+  <!-- 资产选择器弹窗 -->
+  <n-modal
+    v-model:show="showAssetPicker"
+    preset="card"
+    :title="pickerType === 'background' ? '选择背景贴图' : '选择环境贴图'"
+    :style="{ width: '600px', height: '500px' }"
+  >
+    <TextureManager
+      :select-mode="true"
+      :asset-type="pickerAssetType"
+      @select="handleAssetSelect"
+      @close="showAssetPicker = false"
+    />
+  </n-modal>
 </template>
 
 <style scoped>
@@ -356,9 +504,18 @@
   :deep(.n-upload) {
     width: auto;
   }
-  .texture-meta {
-    font-size: 12px;
-    color: #888;
-    margin-top: 4px;
-  }
+.texture-meta {
+  font-size: 12px;
+  color: #888;
+  margin-top: 4px;
+}
+.texture-name-display {
+  font-size: 12px;
+  color: #666;
+  margin-left: 8px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 </style>

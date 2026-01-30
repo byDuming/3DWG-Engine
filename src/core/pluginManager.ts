@@ -5,6 +5,8 @@
  * - 插件的注册、卸载和生命周期管理
  * - 扩展点（对象类型、面板、菜单等）的统一管理
  * - 事件分发和钩子调用
+ * - 插件的启用/禁用状态管理
+ * - 插件配置管理和持久化
  */
 
 import { ref, computed } from 'vue'
@@ -23,6 +25,16 @@ import type {
 } from './plugin'
 import { getPluginMetadata } from './plugin'
 import type { SceneObjectData } from '@/interfaces/sceneInterface'
+import {
+  loadPluginStates,
+  savePluginState,
+  isPluginEnabled as isStoredPluginEnabled,
+  setPluginEnabled as setStoredPluginEnabled,
+  getPluginConfig as getStoredPluginConfig,
+  setPluginConfig as setStoredPluginConfig,
+  hasStoredStates
+} from './pluginStorage'
+import { availablePlugins, getAvailablePlugins } from '@/plugins/_registry'
 
 /**
  * 事件处理器类型
@@ -35,7 +47,7 @@ type EventHandler = (...args: any[]) => void
 export class PluginManager {
   // ==================== 插件存储 ====================
   
-  /** 已注册的插件 */
+  /** 已注册的插件（已启用并安装的） */
   private plugins = new Map<string, EnginePlugin>()
   
   /** 对象类型扩展 */
@@ -61,6 +73,9 @@ export class PluginManager {
   
   /** 响应式版本号（用于触发UI更新） */
   private _version = ref(0)
+  
+  /** 插件配置缓存 */
+  private pluginConfigs = new Map<string, Record<string, any>>()
 
   // ==================== 初始化 ====================
   
@@ -250,7 +265,7 @@ export class PluginManager {
   }
   
   /**
-   * 检查插件是否已注册
+   * 检查插件是否已注册（已安装并运行中）
    */
   hasPlugin(pluginId: string): boolean {
     return this.plugins.has(pluginId)
@@ -261,6 +276,182 @@ export class PluginManager {
    */
   getPlugin(pluginId: string): EnginePlugin | undefined {
     return this.plugins.get(pluginId)
+  }
+
+  // ==================== 插件启用/禁用管理 ====================
+
+  /**
+   * 获取所有可用的插件（从自动发现）
+   */
+  getAvailablePlugins(): EnginePlugin[] {
+    return getAvailablePlugins()
+  }
+
+  /**
+   * 获取可用插件的元数据
+   */
+  getAvailablePluginsMeta(): PluginMetadata[] {
+    return getAvailablePlugins().map(getPluginMetadata)
+  }
+
+  /**
+   * 检查插件是否可用（存在于 plugins 目录）
+   */
+  isAvailable(pluginId: string): boolean {
+    return availablePlugins.has(pluginId)
+  }
+
+  /**
+   * 检查插件是否启用
+   */
+  isEnabled(pluginId: string): boolean {
+    // 首先检查是否有存储的状态
+    if (hasStoredStates()) {
+      return isStoredPluginEnabled(pluginId, false)
+    }
+    // 没有存储状态时，使用插件的默认设置
+    const plugin = availablePlugins.get(pluginId)
+    return plugin?.defaultEnabled ?? false
+  }
+
+  /**
+   * 启用插件
+   * @returns 是否成功启用
+   */
+  async enable(pluginId: string): Promise<boolean> {
+    // 检查插件是否可用
+    const plugin = availablePlugins.get(pluginId)
+    if (!plugin) {
+      console.error(`[PluginManager] Cannot enable plugin ${pluginId}: not found`)
+      return false
+    }
+
+    // 如果已经注册，直接返回成功
+    if (this.plugins.has(pluginId)) {
+      setStoredPluginEnabled(pluginId, true)
+      return true
+    }
+
+    // 注册插件
+    const success = await this.register(plugin)
+    if (success) {
+      setStoredPluginEnabled(pluginId, true)
+      
+      // 应用已保存的配置（如果有）
+      const savedConfig = getStoredPluginConfig(pluginId)
+      if (savedConfig && plugin.onConfigChange && this.context) {
+        this.pluginConfigs.set(pluginId, savedConfig)
+        plugin.onConfigChange(savedConfig, this.context)
+      }
+    }
+    return success
+  }
+
+  /**
+   * 禁用插件
+   * @returns 是否成功禁用
+   */
+  disable(pluginId: string): boolean {
+    // 卸载插件
+    const success = this.unregister(pluginId)
+    if (success) {
+      setStoredPluginEnabled(pluginId, false)
+    }
+    return success
+  }
+
+  /**
+   * 切换插件启用状态
+   */
+  async toggle(pluginId: string): Promise<boolean> {
+    if (this.isEnabled(pluginId)) {
+      return this.disable(pluginId)
+    } else {
+      return this.enable(pluginId)
+    }
+  }
+
+  /**
+   * 加载所有已启用的插件
+   * 应该在设置 context 后调用
+   */
+  async loadEnabledPlugins(): Promise<void> {
+    if (!this.context) {
+      console.error('[PluginManager] Cannot load plugins: context not set')
+      return
+    }
+
+    const plugins = getAvailablePlugins()
+    const isFirstLoad = !hasStoredStates()
+
+    for (const plugin of plugins) {
+      // 判断是否应该启用
+      let shouldEnable: boolean
+      if (isFirstLoad) {
+        // 首次加载使用默认设置
+        shouldEnable = plugin.defaultEnabled ?? false
+        // 保存初始状态
+        setStoredPluginEnabled(plugin.id, shouldEnable)
+      } else {
+        // 使用存储的状态
+        shouldEnable = isStoredPluginEnabled(plugin.id, false)
+      }
+
+      if (shouldEnable) {
+        await this.enable(plugin.id)
+      }
+    }
+
+    console.log(`[PluginManager] Loaded ${this.plugins.size} enabled plugins`)
+  }
+
+  // ==================== 插件配置管理 ====================
+
+  /**
+   * 获取插件配置
+   */
+  getConfig<T extends Record<string, any>>(pluginId: string): T | undefined {
+    // 优先从缓存获取
+    const cached = this.pluginConfigs.get(pluginId)
+    if (cached) return cached as T
+
+    // 从存储获取
+    const stored = getStoredPluginConfig<T>(pluginId)
+    if (stored) {
+      this.pluginConfigs.set(pluginId, stored)
+      return stored
+    }
+
+    // 返回默认配置
+    const plugin = availablePlugins.get(pluginId) || this.plugins.get(pluginId)
+    return plugin?.defaultConfig as T | undefined
+  }
+
+  /**
+   * 设置插件配置
+   */
+  setConfig<T extends Record<string, any>>(pluginId: string, config: T): void {
+    // 更新缓存
+    this.pluginConfigs.set(pluginId, config)
+    
+    // 持久化
+    setStoredPluginConfig(pluginId, config)
+
+    // 通知插件配置变更
+    const plugin = this.plugins.get(pluginId)
+    if (plugin?.onConfigChange && this.context) {
+      plugin.onConfigChange(config, this.context)
+    }
+
+    this._version.value++
+  }
+
+  /**
+   * 更新插件配置（合并）
+   */
+  updateConfig<T extends Record<string, any>>(pluginId: string, patch: Partial<T>): void {
+    const current = this.getConfig<T>(pluginId) || {}
+    this.setConfig(pluginId, { ...current, ...patch } as T)
   }
 
   // ==================== 对象类型扩展 ====================
@@ -568,9 +759,15 @@ export function usePluginManager() {
   return {
     manager: pluginManager,
     version: computed(() => pluginManager.version),
+    // 已安装的插件（已启用并运行中）
     plugins: computed(() => {
       void pluginManager.version
       return pluginManager.getPlugins()
+    }),
+    // 所有可用的插件（从自动发现）
+    availablePlugins: computed(() => {
+      void pluginManager.version
+      return pluginManager.getAvailablePluginsMeta()
     }),
     objectTypes: computed(() => {
       void pluginManager.version
@@ -591,6 +788,9 @@ export function usePluginManager() {
     toolbarItems: computed(() => {
       void pluginManager.version
       return pluginManager.getAllToolbarItems()
-    })
+    }),
+    // 插件启用状态检查
+    isEnabled: (pluginId: string) => pluginManager.isEnabled(pluginId),
+    isAvailable: (pluginId: string) => pluginManager.isAvailable(pluginId)
   }
 }

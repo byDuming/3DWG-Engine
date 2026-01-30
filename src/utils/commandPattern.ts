@@ -17,7 +17,7 @@ import type { SceneObjectData } from '@/interfaces/sceneInterface'
 export interface ISceneStoreActions {
   objectDataList: SceneObjectData[]
   addSceneObjectData(data: SceneObjectData, options?: { skipHistory?: boolean }): SceneObjectData
-  updateSceneObjectData(id: string, patch: Partial<SceneObjectData>, options?: { skipHistory?: boolean }): SceneObjectData | null
+  updateSceneObjectData(id: string, patch: Partial<SceneObjectData>, options?: { skipHistory?: boolean }): Promise<SceneObjectData | null>
   removeSceneObjectData(id: string, options?: { skipHistory?: boolean }): void
 }
 
@@ -171,13 +171,13 @@ export class UpdateTransformCommand extends BaseCommand {
   }
   
   execute() {
-    this.getStore().updateSceneObjectData(this.objectId, {
+    void this.getStore().updateSceneObjectData(this.objectId, {
       transform: this.newTransform
     }, { skipHistory: true } as any)
   }
   
   undo() {
-    this.getStore().updateSceneObjectData(this.objectId, {
+    void this.getStore().updateSceneObjectData(this.objectId, {
       transform: this.initialTransform
     }, { skipHistory: true } as any)
   }
@@ -266,11 +266,11 @@ export class UpdateObjectCommand extends BaseCommand {
   }
   
   execute() {
-    this.getStore().updateSceneObjectData(this.objectId, this.patch, { skipHistory: true } as any)
+    void this.getStore().updateSceneObjectData(this.objectId, this.patch, { skipHistory: true } as any)
   }
   
   undo() {
-    this.getStore().updateSceneObjectData(this.objectId, this.initialData, { skipHistory: true } as any)
+    void this.getStore().updateSceneObjectData(this.objectId, this.initialData, { skipHistory: true } as any)
   }
   
   merge(other: ICommand): boolean {

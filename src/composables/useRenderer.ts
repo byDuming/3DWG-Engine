@@ -378,8 +378,7 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
 
   /**
    * 切换到新场景（统一入口）
-   * 按正确顺序执行：停止渲染 → 清理 → 创建场景 → 同步对象 → 设置相机 → 设置控制器 → 开始渲染
-   * 现在会等待所有资产加载完成
+   * 先创建场景和相机并启动渲染，然后加载资产，这样用户能看到场景逐渐加载
    */
   async function switchScene() {
     console.log('[useRenderer] switchScene() 开始')
@@ -387,7 +386,7 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
     // 1. 停止当前渲染
     stop()
 
-    // 2. 清理旧的 transformControls gizmo（但保留控制器实例）
+    // 2. 清理旧的 transformControls gizmo
     if (transformControls.value && sceneStore.threeScene) {
       const gizmo = transformControls.value.getHelper()
       sceneStore.threeScene.remove(gizmo)
@@ -397,49 +396,61 @@ export function useRenderer(opts: { antialias?: boolean } = {}) {
     // 3. 创建新的 Three.js 场景
     const scene = new Scene()
     scene.background = new Color('#CFD8DC')
-    
-    // 4. 设置场景到 store（这会创建所有 three.js 对象并挂载，并等待所有资产加载完成）
-    await sceneStore.setThreeScene(scene)
+    sceneStore.threeScene = scene
 
-    // 5. 从 store 中找到或创建相机
-    const cam = ensureCamera()
-    if (!cam) {
-      console.error('[useRenderer] 无法获取相机')
-      return
-    }
-
-    // 6. 更新控制器的相机引用
-    updateControlsCamera()
-    
-    // 6.5 从保存的数据恢复相机目标点
-    if (controls.value) {
-      const cameraData = sceneStore.objectDataList.find(item => item.type === 'camera')
-      const savedTarget = cameraData?.camera?.target
-      if (savedTarget) {
+    // 4. 先从 objectDataList 创建相机（场景数据已加载，相机数据已存在）
+    const cameraData = sceneStore.objectDataList.find(item => item.type === 'camera')
+    if (cameraData) {
+      // 使用 createThreeObject 创建相机
+      const { createThreeObject, applyCameraSettings, applyTransform } = await import('@/utils/threeObjectFactory')
+      const cam = createThreeObject(cameraData, { objectsMap: sceneStore.objectsMap })
+      sceneStore.objectsMap.set(cameraData.id, cam)
+      scene.add(cam)
+      
+      // 应用相机设置和变换
+      if (cam instanceof PerspectiveCamera) {
+        applyCameraSettings(cam, cameraData)
+        applyTransform(cam, cameraData)
+        camera.value = cam
+        updateCameraAspect()
+      }
+      
+      // 设置控制器目标点
+      const savedTarget = cameraData.camera?.target ?? [0, 0, 0]
+      if (controls.value) {
+        controls.value.object = cam
         controls.value.target.set(savedTarget[0], savedTarget[1], savedTarget[2])
         controls.value.update()
-        // 同步到 store
-        sceneStore.setCameraControlsTarget([savedTarget[0], savedTarget[1], savedTarget[2]])
-        console.log('[switchScene] 从保存数据恢复相机目标点:', savedTarget)
+        sceneStore.setCameraControlsTarget(savedTarget)
       }
+    } else {
+      // 没有保存的相机，创建默认相机
+      ensureCamera()
     }
 
-    // 7. 确保 transformControls 的 gizmo 在新场景中
+    // 5. 立即开始渲染（用户能看到场景背景）
+    resize()
+    start()
+    console.log('[useRenderer] 渲染已启动，开始加载资产...')
+
+    // 6. 加载场景内容（对象、资产会逐渐出现）
+    // setThreeScene 会跳过已创建的相机
+    await sceneStore.setThreeScene(scene)
+
+    // 7. 更新控制器
+    updateControlsCamera()
+    
+    // 8. 确保 transformControls 在新场景中
     if (transformControls.value && sceneStore.threeScene) {
       const gizmo = transformControls.value.getHelper()
       if (gizmo.parent !== sceneStore.threeScene) {
         if (gizmo.parent) gizmo.parent.remove(gizmo)
         sceneStore.threeScene.add(gizmo)
       }
-      // 重新附加到选中对象
       attachTransformControl(sceneStore.selectedObjectId)
     }
 
-    // 8. 调整大小并开始渲染
-    resize()
-    start()
-
-    console.log('[useRenderer] switchScene() 完成（所有资产已加载）')
+    console.log('[useRenderer] switchScene() 完成')
   }
 
   // ==================== 初始化（首次挂载）====================

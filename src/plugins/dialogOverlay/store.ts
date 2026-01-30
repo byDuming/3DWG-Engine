@@ -44,4 +44,3 @@ export function updateDialog(id: string, patch: Partial<Omit<DialogInstance, 'id
 export function listDialogs() {
   return dialogStore.dialogs
 }
-

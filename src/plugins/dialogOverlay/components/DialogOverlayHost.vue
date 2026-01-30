@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { dialogStore, closeDialog } from './dialogStore'
+import { dialogStore, closeDialog } from '../store'
 
 const dialogs = computed(() => dialogStore.dialogs)
 
@@ -103,4 +103,3 @@ function anchorTransform(anchor?: string) {
   opacity: 1;
 }
 </style>
-

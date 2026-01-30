@@ -3,10 +3,25 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { sceneApi, type SceneListItem } from '@/services/sceneApi'
 import { useDialog, useMessage } from 'naive-ui'
+import { useAuthGuard } from '@/composables/useAuthGuard'
+import { useAuthStore } from '@/stores/modules/useAuth.store'
 
 const router = useRouter()
 const dialog = useDialog()
 const message = useMessage()
+const { requireAuth } = useAuthGuard()
+const authStore = useAuthStore()
+
+// 处理登出
+async function handleLogout() {
+  await authStore.logout()
+  message.success('已登出')
+}
+
+// 打开登录对话框
+function handleOpenLogin() {
+  authStore.showLoginDialog = true
+}
 
 const sceneList = ref<SceneListItem[]>([])
 const loading = ref(false)
@@ -29,6 +44,11 @@ async function loadSceneList() {
 
 // 创建新场景
 async function createNewScene() {
+  // 权限检查
+  if (!await requireAuth()) {
+    return
+  }
+  
   // 使用浏览器原生 prompt，简单直接
   const inputName = prompt('请输入场景名称：', `新场景 ${new Date().toLocaleString()}`)
   
@@ -63,6 +83,12 @@ async function createNewScene() {
 // 删除场景
 async function handleDeleteScene(id: number, name: string, event: Event) {
   event.stopPropagation()
+  
+  // 权限检查
+  if (!await requireAuth()) {
+    return
+  }
+  
   dialog.warning({
     title: '确认删除',
     content: `确定要删除场景 "${name}" 吗？此操作不可恢复。`,
@@ -94,7 +120,12 @@ function handlePreviewScene(id: number) {
 }
 
 // 跳转到编辑页面（点击编辑按钮）
-function handleEditScene(id: number) {
+async function handleEditScene(id: number) {
+  // 权限检查
+  if (!await requireAuth()) {
+    return
+  }
+  
   router.push(`/engine?sceneId=${id}&mode=edit`)
 }
 
@@ -113,15 +144,16 @@ onMounted(() => {
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1vw;">
       <h2 style="margin: 0;">我的作品</h2>
       <n-space>
-        <!-- <n-button type="info" @click="handleTestConnection" :loading="loading">
-          测试连接
-        </n-button>
-        <n-button type="success" @click="handleTestCreateScene" :loading="loading">
-          测试创建
-        </n-button> -->
         <n-button type="primary" @click="createNewScene" :loading="loading">
           新增场景
         </n-button>
+        <template v-if="authStore.isLoggedIn">
+          <n-text depth="3">{{ authStore.userEmail }}</n-text>
+          <n-button @click="handleLogout">登出</n-button>
+        </template>
+        <template v-else>
+          <n-button type="info" @click="handleOpenLogin">登录</n-button>
+        </template>
       </n-space>
     </div>
     

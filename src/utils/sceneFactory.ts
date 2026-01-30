@@ -542,6 +542,7 @@ export function createSceneObjectData(input: SceneObjectInput): SceneObjectData 
       backgroundColor: '#CFD8DC',
       environmentType: 'none' as const,
       environmentMap: undefined,
+      environmentIntensity: 1,
       fog: {
         type: 'none' as const,
         color: '#ffffff',

@@ -57,6 +57,24 @@ export interface EnginePlugin {
   hooks?: PluginHooks
   
   /** 
+   * 是否默认启用（首次加载时）
+   * 如果未设置，默认为 false
+   */
+  defaultEnabled?: boolean
+  
+  /** 
+   * 插件默认配置
+   * 首次加载时会使用此配置
+   */
+  defaultConfig?: Record<string, any>
+  
+  /** 
+   * 配置变更回调
+   * 当插件配置被修改时调用
+   */
+  onConfigChange?: (config: Record<string, any>, context: EngineContext) => void
+  
+  /** 
    * 安装函数
    * 在插件被注册时调用
    */

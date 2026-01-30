@@ -108,6 +108,28 @@ const cubeTextureLoader = new CubeTextureLoader()
 const rgbeLoader = new RGBELoader()
 const textureCache = new Map<string, Texture>()
 
+// ==================== 进度追踪相关类型 ====================
+
+/** 加载进度回调 */
+export interface LoadProgressCallback {
+  onStart?: (url: string) => void
+  onProgress?: (url: string, loaded: number, total: number) => void
+  onComplete?: (url: string) => void
+  onError?: (url: string, error: string) => void
+}
+
+/** 提取文件名 */
+function extractFileName(url: string): string {
+  try {
+    const urlObj = new URL(url)
+    const pathname = urlObj.pathname
+    const segments = pathname.split('/')
+    return segments[segments.length - 1] || url.slice(0, 30)
+  } catch {
+    return url.slice(0, 30)
+  }
+}
+
 /**
  * 判断贴图源是否有效
  * 支持格式：
@@ -167,7 +189,7 @@ const depthFuncMap: Record<string, number> = {
 }
 
 /**
- * 获取贴图对象
+ * 获取贴图对象（同步版本，用于运行时编辑）
  * 支持加载：
  * - HTTP/HTTPS URLs（云存储，如 Supabase Storage）
  * - data: URLs（Base64 编码，向后兼容旧数据）
@@ -192,10 +214,331 @@ function getTexture(source?: string) {
 }
 
 /**
+ * 异步加载贴图（带进度追踪）
+ * 用于场景初始化时的贴图预加载
+ * @param source 贴图URL
+ * @param callbacks 进度回调函数
+ * @returns Promise<Texture | null>
+ */
+export async function loadTextureWithProgress(
+  source: string,
+  callbacks?: LoadProgressCallback
+): Promise<Texture | null> {
+  if (!isValidTextureSource(source)) return null
+  
+  // 检查缓存
+  const cached = textureCache.get(source)
+  if (cached) {
+    callbacks?.onComplete?.(source)
+    return cached
+  }
+  
+  callbacks?.onStart?.(source)
+  
+  return new Promise((resolve) => {
+    textureLoader.load(
+      source,
+      (texture) => {
+        textureCache.set(source, texture)
+        callbacks?.onComplete?.(source)
+        resolve(texture)
+      },
+      (event) => {
+        if (event.lengthComputable) {
+          callbacks?.onProgress?.(source, event.loaded, event.total)
+        }
+      },
+      (error) => {
+        console.warn(`[loadTextureWithProgress] 加载贴图失败: ${source}`, error)
+        callbacks?.onError?.(source, (error as Error)?.message || '加载失败')
+        resolve(null)
+      }
+    )
+  })
+}
+
+/**
+ * 异步加载HDR环境贴图
+ * @param source HDR文件URL
+ * @returns Promise<Texture | null>
+ */
+async function loadHDRTextureAsync(source: string): Promise<Texture | null> {
+  if (!isValidTextureSource(source)) return null
+  
+  const key = `hdr:${source}`
+  const cached = textureCache.get(key)
+  if (cached) {
+    // 检查缓存的纹理是否已加载完成
+    if ((cached as any).image) {
+      return cached
+    }
+  }
+  
+  return new Promise((resolve, reject) => {
+    try {
+      const texture = rgbeLoader.load(
+        source,
+        (loaded) => {
+          // 加载成功回调
+          loaded.mapping = EquirectangularReflectionMapping
+          loaded.needsUpdate = true
+          textureCache.set(key, loaded)
+          resolve(loaded)
+        },
+        undefined,
+        (error) => {
+          // 加载失败回调
+          console.warn('[loadHDRTextureAsync] 加载 HDR 贴图失败', error)
+          reject(error)
+        }
+      )
+      texture.mapping = EquirectangularReflectionMapping
+    } catch (error) {
+      console.warn('[loadHDRTextureAsync] 加载 HDR 贴图失败', error)
+      reject(error)
+    }
+  })
+}
+
+/**
+ * 异步加载HDR环境贴图（带进度追踪）
+ * @param source HDR文件URL
+ * @param callbacks 进度回调函数
+ * @returns Promise<Texture | null>
+ */
+export async function loadHDRTextureWithProgress(
+  source: string,
+  callbacks?: LoadProgressCallback
+): Promise<Texture | null> {
+  if (!isValidTextureSource(source)) return null
+  
+  const key = `hdr:${source}`
+  const cached = textureCache.get(key)
+  if (cached && (cached as any).image) {
+    callbacks?.onComplete?.(source)
+    return cached
+  }
+  
+  callbacks?.onStart?.(source)
+  
+  return new Promise((resolve) => {
+    try {
+      rgbeLoader.load(
+        source,
+        (loaded) => {
+          loaded.mapping = EquirectangularReflectionMapping
+          loaded.needsUpdate = true
+          textureCache.set(key, loaded)
+          callbacks?.onComplete?.(source)
+          resolve(loaded)
+        },
+        (event) => {
+          if (event.lengthComputable) {
+            callbacks?.onProgress?.(source, event.loaded, event.total)
+          }
+        },
+        (error) => {
+          console.warn('[loadHDRTextureWithProgress] 加载 HDR 贴图失败', error)
+          callbacks?.onError?.(source, (error as Error)?.message || '加载失败')
+          resolve(null)
+        }
+      )
+    } catch (error) {
+      console.warn('[loadHDRTextureWithProgress] 加载 HDR 贴图失败', error)
+      callbacks?.onError?.(source, (error as Error)?.message || '加载失败')
+      resolve(null)
+    }
+  })
+}
+
+/**
+ * 异步加载立方体贴图（带进度追踪）
+ * @param sources 6张贴图的URL数组
+ * @param callbacks 进度回调函数
+ * @returns Promise<Texture | null>
+ */
+export async function loadCubeTextureWithProgress(
+  sources: string[],
+  callbacks?: LoadProgressCallback
+): Promise<Texture | null> {
+  if (!sources || sources.length !== 6) return null
+  
+  const validSources = sources.filter(isValidTextureSource)
+  if (validSources.length !== 6) return null
+  
+  const key = `cube:${sources.join('|')}`
+  const cached = textureCache.get(key)
+  if (cached) {
+    callbacks?.onComplete?.(key)
+    return cached
+  }
+  
+  callbacks?.onStart?.(key)
+  
+  return new Promise((resolve) => {
+    cubeTextureLoader.load(
+      sources,
+      (texture) => {
+        textureCache.set(key, texture)
+        callbacks?.onComplete?.(key)
+        resolve(texture)
+      },
+      (event) => {
+        if (event.lengthComputable) {
+          callbacks?.onProgress?.(key, event.loaded, event.total)
+        }
+      },
+      (error) => {
+        console.warn('[loadCubeTextureWithProgress] 加载立方体贴图失败', error)
+        callbacks?.onError?.(key, (error as Error)?.message || '加载失败')
+        resolve(null)
+      }
+    )
+  })
+}
+
+// ==================== 贴图收集辅助函数 ====================
+
+/** 贴图类型枚举 */
+const TEXTURE_MAP_KEYS = [
+  'map', 'alphaMap', 'normalMap', 'displacementMap', 'roughnessMap',
+  'metalnessMap', 'aoMap', 'lightMap', 'bumpMap', 'emissiveMap',
+  'specularMap', 'gradientMap', 'matcap', 'transmissionMap', 'thicknessMap',
+  'anisotropyMap', 'clearcoatNormalMap', 'clearcoatMap', 'clearcoatRoughnessMap',
+  'sheenColorMap', 'sheenRoughnessMap', 'iridescenceMap', 'iridescenceThicknessMap',
+  'specularIntensityMap', 'specularColorMap', 'armMap'
+] as const
+
+/**
+ * 从材质数据中收集所有贴图URL
+ * @param material 材质数据
+ * @returns 贴图URL集合
+ */
+export function collectTextureUrlsFromMaterial(material: MaterialData): Set<string> {
+  const urls = new Set<string>()
+  
+  for (const key of TEXTURE_MAP_KEYS) {
+    const url = (material as any)[key]
+    if (isValidTextureSource(url)) {
+      urls.add(url)
+    }
+  }
+  
+  // 环境贴图
+  const envMap = (material as any).envMap
+  if (envMap) {
+    if (Array.isArray(envMap)) {
+      envMap.forEach((url: string) => {
+        if (isValidTextureSource(url)) urls.add(url)
+      })
+    } else if (isValidTextureSource(envMap)) {
+      urls.add(envMap)
+    }
+  }
+  
+  return urls
+}
+
+/**
+ * 从场景对象数据中收集所有贴图URL
+ * @param objectDataList 场景对象数据列表
+ * @returns 分类的贴图URL信息
+ */
+export function collectAllTextureUrls(objectDataList: SceneObjectData[]): {
+  textures: Set<string>
+  hdrTextures: Set<string>
+  cubeTextures: string[][]
+} {
+  const textures = new Set<string>()
+  const hdrTextures = new Set<string>()
+  const cubeTextures: string[][] = []
+  
+  /** 添加贴图URL到对应集合 */
+  const addTextureUrl = (url: string) => {
+    if (!isValidTextureSource(url)) return
+    if (url.toLowerCase().endsWith('.hdr')) {
+      hdrTextures.add(url)
+    } else {
+      textures.add(url)
+    }
+  }
+  
+  /** 处理材质中的贴图 */
+  const processMaterial = (mat: MaterialData) => {
+    const matUrls = collectTextureUrlsFromMaterial(mat)
+    matUrls.forEach(addTextureUrl)
+    
+    // 处理立方体贴图
+    const envMap = (mat as any).envMap
+    const envMapType = (mat as any).envMapType
+    if (envMapType === 'cube' && Array.isArray(envMap) && envMap.length === 6) {
+      const validCube = envMap.filter(isValidTextureSource)
+      if (validCube.length === 6) {
+        cubeTextures.push(envMap)
+      }
+    }
+  }
+  
+  for (const obj of objectDataList) {
+    // 从 mesh.material 收集贴图（mesh 类型）
+    if (obj.mesh?.material) {
+      processMaterial(obj.mesh.material)
+    }
+    
+    // 兼容：从 materials 数组收集贴图（如果存在）
+    if ((obj as any).materials && Array.isArray((obj as any).materials)) {
+      for (const mat of (obj as any).materials) {
+        processMaterial(mat)
+      }
+    }
+    
+    // 从场景设置收集背景和环境贴图
+    if (obj.scene) {
+      const sceneSettings = obj.scene
+      
+      // 背景贴图
+      if (sceneSettings.backgroundTexture) {
+        addTextureUrl(sceneSettings.backgroundTexture)
+      }
+      
+      // 背景立方体贴图
+      if (sceneSettings.backgroundCube && Array.isArray(sceneSettings.backgroundCube)) {
+        const validCube = sceneSettings.backgroundCube.filter(isValidTextureSource)
+        if (validCube.length === 6) {
+          cubeTextures.push(sceneSettings.backgroundCube)
+        } else {
+          sceneSettings.backgroundCube.forEach(addTextureUrl)
+        }
+      }
+      
+      // 环境贴图
+      if (sceneSettings.environmentMap) {
+        if (Array.isArray(sceneSettings.environmentMap)) {
+          // 立方体环境贴图
+          const validCube = sceneSettings.environmentMap.filter(isValidTextureSource)
+          if (validCube.length === 6) {
+            cubeTextures.push(sceneSettings.environmentMap)
+          } else {
+            sceneSettings.environmentMap.forEach(addTextureUrl)
+          }
+        } else {
+          // 单张环境贴图（equirect 或 hdr）
+          addTextureUrl(sceneSettings.environmentMap)
+        }
+      }
+    }
+  }
+  
+  return { textures, hdrTextures, cubeTextures }
+}
+
+export { extractFileName }
+
+/**
  * 获取环境贴图
  * 支持类型：
  * - cube: 立方体贴图（6张图片）
- * - hdr: HDR 环境贴图
+ * - hdr: HDR 环境贴图（注意：HDR加载是异步的，此函数返回的纹理可能还未完全加载）
  * - equirect: 等距圆柱投影贴图
  */
 function getEnvMapTexture(source?: string | string[], envMapType?: string) {
@@ -229,20 +572,15 @@ function getEnvMapTexture(source?: string | string[], envMapType?: string) {
     
     const key = `hdr:${source}`
     const cached = textureCache.get(key)
-    if (cached) return cached
-    
-    try {
-      const texture = rgbeLoader.load(source, (loaded) => {
-        loaded.mapping = EquirectangularReflectionMapping
-        loaded.needsUpdate = true
-      })
-      texture.mapping = EquirectangularReflectionMapping
-      textureCache.set(key, texture)
-      return texture
-    } catch (error) {
-      console.warn('[getEnvMapTexture] 加载 HDR 贴图失败', error)
-      return null
+    // 如果缓存存在且已加载完成，直接返回
+    if (cached && (cached as any).image) {
+      return cached
     }
+    
+    // 否则返回null，调用者应该使用loadHDRTextureAsync
+    // 这里返回null是为了避免返回未完全加载的纹理导致着色器错误
+    console.warn('[getEnvMapTexture] HDR纹理需要异步加载，请使用loadHDRTextureAsync')
+    return null
   }
 
   if (typeof source === 'string') {
@@ -254,10 +592,21 @@ function getEnvMapTexture(source?: string | string[], envMapType?: string) {
   return null
 }
 
-function getBackgroundTexture(settings?: SceneObjectData['scene']) {
+async function getBackgroundTexture(settings?: SceneObjectData['scene']): Promise<Texture | null> {
   if (!settings) return null
   if (settings.backgroundType === 'texture') {
-    return getTexture(settings.backgroundTexture)
+    // 检查是否是HDR文件（通过URL判断）
+    const bgTexture = settings.backgroundTexture
+    if (bgTexture && (bgTexture.toLowerCase().endsWith('.hdr') || bgTexture.toLowerCase().endsWith('.exr'))) {
+      // HDR背景需要异步加载
+      try {
+        return await loadHDRTextureAsync(bgTexture)
+      } catch (error) {
+        console.error('[getBackgroundTexture] 加载HDR背景失败', error)
+        return null
+      }
+    }
+    return getTexture(bgTexture)
   }
   if (settings.backgroundType === 'cube') {
     return getEnvMapTexture(settings.backgroundCube, 'cube')
@@ -616,8 +965,30 @@ export function applyCameraSettings(camera: PerspectiveCamera, data?: SceneObjec
   camera.updateProjectionMatrix()
 }
 
+/**
+ * 更新场景中所有材质的envMapIntensity
+ * 用于控制环境贴图的整体强度/曝光
+ */
+function updateAllMaterialsEnvMapIntensity(scene: Scene, intensity: number) {
+  scene.traverse((object) => {
+    if ((object as any).isMesh && (object as any).material) {
+      const material = (object as any).material
+      // 处理多材质情况
+      if (Array.isArray(material)) {
+        material.forEach((mat: any) => {
+          if (mat && 'envMapIntensity' in mat) {
+            mat.envMapIntensity = intensity
+          }
+        })
+      } else if (material && 'envMapIntensity' in material) {
+        material.envMapIntensity = intensity
+      }
+    }
+  })
+}
+
 /** Sync Scene-level settings (background/environment/fog) from SceneObjectData. */
-export function applySceneSettings(scene: Scene, data?: SceneObjectData) {
+export async function applySceneSettings(scene: Scene, data?: SceneObjectData): Promise<void> {
   if (!data?.scene) return
   const settings = data.scene
 
@@ -627,7 +998,12 @@ export function applySceneSettings(scene: Scene, data?: SceneObjectData) {
       break
     case 'texture':
     case 'cube':
-      scene.background = getBackgroundTexture(settings)
+      const bgTexture = await getBackgroundTexture(settings)
+      scene.background = bgTexture
+      // 注意：背景曝光控制需要更复杂的实现
+      // Three.js 的 Texture 没有直接的 intensity 属性
+      // 背景曝光主要通过渲染器的 toneMappingExposure 控制，但这会影响整个场景
+      // 目前背景强度参数已添加到接口中，但实际控制需要后续实现
       break
     case 'color':
     default:
@@ -637,8 +1013,37 @@ export function applySceneSettings(scene: Scene, data?: SceneObjectData) {
 
   if (!settings.environmentType || settings.environmentType === 'none') {
     scene.environment = null
+    // 清除环境强度时，恢复所有材质的默认envMapIntensity
+    updateAllMaterialsEnvMapIntensity(scene, 1)
   } else {
-    scene.environment = getEnvMapTexture(settings.environmentMap, settings.environmentType)
+    let envTexture: Texture | null = null
+    
+    if (settings.environmentType === 'hdr' && typeof settings.environmentMap === 'string') {
+      // HDR纹理需要异步加载
+      try {
+        envTexture = await loadHDRTextureAsync(settings.environmentMap)
+      } catch (error) {
+        console.error('[applySceneSettings] 加载HDR环境贴图失败', error)
+        scene.environment = null
+        updateAllMaterialsEnvMapIntensity(scene, 1)
+        return
+      }
+    } else {
+      envTexture = getEnvMapTexture(settings.environmentMap, settings.environmentType)
+    }
+
+    if (envTexture) {
+      // 直接使用环境贴图（PMREMGenerator 在 Three.js 0.182.0 中可能不可用或路径不同）
+      // 环境贴图的优化可以通过调整材质强度来实现
+      scene.environment = envTexture
+      
+      // 应用环境贴图强度：通过调整所有材质的envMapIntensity来控制曝光
+      const intensity = settings.environmentIntensity ?? 1
+      updateAllMaterialsEnvMapIntensity(scene, intensity)
+    } else {
+      scene.environment = null
+      updateAllMaterialsEnvMapIntensity(scene, 1)
+    }
   }
 
   const fog = settings.fog
@@ -1109,5 +1514,5 @@ export function createThreeObject(data: SceneObjectData, opts?: { objectsMap?: M
   return obj
 }
 
-// 导出验证函数供其他模块使用
-export { isValidTextureSource }
+// 导出验证函数和HDR加载函数供其他模块使用
+export { isValidTextureSource, loadHDRTextureAsync }
